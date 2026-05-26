@@ -15,7 +15,7 @@ que genes con una mayor expresión de media tienden a presentar una mayor
 varianza (Basandose en una distribución de Poisson). Por ende, es necesario 
 establecer 
  
-Referencia del dataset:
+Referencias:
 Amezquita, R. A., Lun, A. T. L., Becht, E., Carey, V. J., Carpp, L. N., 
 Geistlinger, L., Martini, F., Rue-Albrecht, K., Risso, D., Soneson, C., 
 Waldron, L., Pagès, H., Smith, M. L., Huber, W., Morgan, M., Gottardo, R., 
@@ -323,7 +323,7 @@ def plot_bins_hvg(means: np.ndarray,
 if __name__ == "__main__":
     # ── Configuración ────────────────────────────────────────────────
     source_file = Path(__file__).resolve().parent / "Parameterization" / "GSE63511.csv.zip"
-    output_dir  = Path(__file__).resolve().parent / "Output"
+    output_dir  = Path(__file__).resolve().parent / "Reduced Datasets"
     cant_genes  = 500
     n_bins      = 20
  
