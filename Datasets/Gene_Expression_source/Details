@@ -1,0 +1,38 @@
+Parameterization_dataset_1:
+    - Code          -> GSE63511 (Head/Neck Cancer)
+    - Species       -> Homo Sapiens (Tax ID: 9606)
+    - Tumor/Normal  -> 8/8
+    - Source Link   -> https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE63511
+    - DisGenet Code -> C0238463
+    - Reduction     -> K1
+Parameterization_dataset_2:
+    - Code          -> GSE37764 (Lung Cancer)
+    - Species       -> Homo Sapiens (Tax ID: 9606)
+    - Tumor/Normal  -> 6/6
+    - Source Link   -> https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE37764
+    - DisGenet Code -> C0152013
+    - Reduction     -> K2
+
+Experimentation_dataset_1:
+    - Code          -> GSE40419 (Lung Cancer)
+    - Species       -> Homo Sapiens (Tax ID: 9606)
+    - Tumor/Normal  -> 87/77
+    - Source Link   -> https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE40419
+    - DisGenet Code -> C0152013
+    - Reduction     -> K3
+Experimentation_dataset_2:
+    - Code          -> GSE68799 (Head/Neck Cancer)
+    - Species       -> Homo Sapiens (Tax ID: 9606)
+    - Tumor/Normal  -> 41/4
+    - Source Link   -> https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE68799
+    - DisGenet Code -> C2931822
+    - Reduction     -> K4
+Experimentation_dataset_3:
+    - Code          -> GSE52194 (Breast Cancer)
+    - Species       -> Homo Sapiens (Tax ID: 9606)
+    - Tumor/Normal  -> 17/3
+    - Source Link   -> https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE52194
+    - DisGenet Code -> C0678222
+    - Reduction     -> K5
+
+Original sources: https://sbcb.inf.ufrgs.br/barracurda
