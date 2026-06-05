@@ -322,8 +322,8 @@ def plot_bins_hvg(means: np.ndarray,
 ##################################
 if __name__ == "__main__":
     # ── Configuración ────────────────────────────────────────────────
-    source_file = Path(__file__).resolve().parent / "Parameterization" / "GSE63511.csv.zip"
-    output_dir  = Path(__file__).resolve().parent / "Reduced Datasets"
+    source_file = Path(__file__).resolve().parent / "Gene_Expression_source" / "GSE40419.csv.zip"
+    output_dir  = Path(__file__).resolve().parent / "Reduced_Datasets"
     cant_genes  = 500
     n_bins      = 20
  
