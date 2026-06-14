@@ -76,7 +76,7 @@ def load_distance_matrix(filepath: str) -> tuple[np.ndarray, list[str]]:
     gene_names = df.index.astype(str).tolist()
 
     # Extracción de valores de las matrices.
-    matrix = df.values.astype(np.float64)
+    matrix = 1 - df.values.astype(np.float64)
 
     # Validaciones: Se espera una matriz cuadrada de distancia que provean un rango
     # de 1 (desiguales) hasta 0 (iguales).
@@ -384,47 +384,50 @@ def xie_beni_eb(
  
     return numerator / (n * min_inter)
 
- 
 def save_xb_score(
     individuo: str,
-    xb_score: float,
+    xb_deb: float,
+    xb_dbb: float,
     output_dir: str,
     filename: str = "xb_score.csv",
 ) -> str:
     """
-    Guarda el score XBEB de una solución individual como .csv.
- 
+    Guarda los scores XBEB y XBBB de una solución individual como .csv.
+
     Columnas del archivo
     --------------------
     individuo : str   — identificador de la solución evaluada.
-    XBEB      : float — valor del índice Xie-Beni de expresión.
- 
+    XBEB      : float — valor del índice Xie-Beni usando distancia de expresión (DEB).
+    XBBB      : float — valor del índice Xie-Beni usando distancia de binding (DBB).
+
     Parámetros
     ----------
-    individuo  : str — nombre de la solución (ej. "solucion1").
-    xb_score   : float — valor retornado por xie_beni_eb().
-    output_dir : str — carpeta destino (se crea si no existe).
-    filename   : str — nombre del archivo de salida.
- 
+    individuo  : str   — nombre de la solución (ej. "solucion1").
+    xb_deb     : float — valor retornado por xie_beni_eb() con DEB.
+    xb_dbb     : float — valor retornado por xie_beni_eb() con DBB.
+    output_dir : str   — carpeta destino (se crea si no existe).
+    filename   : str   — nombre del archivo de salida.
+
     Retorna
     -------
     str — ruta completa del archivo guardado.
- 
+
     Ejemplo
     -------
-    >>> path = save_xb_score("solucion1", 0.127, output_dir="resultados")
+    >>> path = save_xb_score("solucion1", 0.127, 0.089, output_dir="resultados")
     """
     out_path = Path(output_dir)
     out_path.mkdir(parents=True, exist_ok=True)
- 
+
     df = pd.DataFrame({
         "individuo": [individuo],
-        "XBEB":      [xb_score],
+        "XBEB":      [xb_deb],
+        "XBBB":      [xb_dbb],
     })
- 
+
     full_path = out_path / filename
     df.to_csv(full_path, index=False)
-    print(f"[save] Score XBEB guardado en: {full_path}")
+    print(f"[save] Scores XB guardados en: {full_path}  (XBEB={xb_deb:.6f}, XBBB={xb_dbb:.6f})")
     return str(full_path)
 
 
@@ -485,29 +488,25 @@ def run_medoid_clustering(
     """
     # 1. Cargar matrices — los nombres de genes vienen de la misma matriz
     deb, gene_names_deb = load_distance_matrix(deb_path)
-    #dbb, gene_names_dbb = load_distance_matrix(dbb_path)
+    dbb, gene_names_dbb = load_distance_matrix(dbb_path)
 
     # Verificar coherencia entre matrices
-    #if deb.shape != dbb.shape:
-    #    raise ValueError(
-    #        f"Las matrices DEB {deb.shape} y DBB {dbb.shape} deben tener el mismo tamaño."
-    #    )
-    #if gene_names_deb != gene_names_dbb:
-    #    raise ValueError(
-    #        "Los nombres de genes en DEB y DBB no coinciden. "
-    #        "Verifica que ambas matrices correspondan al mismo dataset."
-    #    )
+    if deb.shape != dbb.shape:
+        raise ValueError(
+            f"Las matrices DEB {deb.shape} y DBB {dbb.shape} deben tener el mismo tamaño."
+        )
+    if gene_names_deb != gene_names_dbb:
+        raise ValueError(
+            "Los nombres de genes en DEB y DBB no coinciden. "
+            "Verifica que ambas matrices correspondan al mismo dataset."
+        )
 
     gene_names = gene_names_deb
     n = deb.shape[0]
 
-    # 2. Seleccionar matriz activa
+    # 2. Validar distance_type
     distance_type = distance_type.upper()
-    if distance_type == "DEB":
-        active_matrix = deb
-    #elif distance_type == "DBB":
-    #    active_matrix = dbb
-    else:
+    if distance_type not in ("DEB", "DBB"):
         raise ValueError("distance_type debe ser 'DEB' o 'DBB'.")
 
     # 3. Definir población de medoides
@@ -525,45 +524,56 @@ def run_medoid_clustering(
         genes_med = [gene_names[idx] for idx in medoids]
         print(f"  Individuo {i + 1:>3}: medoides → {genes_med}")
 
-    # 4. Construir clusters para toda la población
-    print(f"\n[clusters] Asignando {n} genes para {population.shape[0]} individuos "
-          f"con distancia {distance_type}...")
-    all_labels = build_clusters_population(active_matrix, population)
+    # 4. Construir clusters para ambas matrices
+    print(f"\n[clusters] Asignando {n} genes para {population.shape[0]} individuos ...")
+    all_labels_deb = build_clusters_population(deb, population)
+    all_labels_dbb = build_clusters_population(dbb, population)
+
+    # Matriz activa para el CSV de clusters (según distance_type)
+    all_labels = all_labels_deb if distance_type == "DEB" else all_labels_dbb
 
     # Resumen de distribución por individuo
-    for i, labels in enumerate(all_labels):
-        unique, counts = np.unique(labels, return_counts=True)
+    for i, row_labels in enumerate(all_labels):
+        unique, counts = np.unique(row_labels, return_counts=True)
         dist = {int(c): int(cnt) for c, cnt in zip(unique, counts)}
-        print(f"  Individuo {i + 1:>3}: distribución de clusters → {dist}")
+        print(f"  Individuo {i + 1:>3}: distribución de clusters ({distance_type}) → {dist}")
 
-    # 5. Guardar
+    # 5. Guardar CSV de clusters
     fname = f"clusters_pop{population.shape[0]}_k{k}_{distance_type.lower()}.csv"
-    out_path = save_clusters(
+    clusters_path = save_clusters(
         all_labels=all_labels,
         gene_names=gene_names,
         output_dir=output_dir,
         filename=fname,
     )
 
-    xb_score = xie_beni_eb(active_matrix, population[0], labels)
- 
-    print(f"  XBEB = {xb_score:.6f}"
-          + ("  (solución degenerada)" if xb_score == np.inf else ""))
- 
-    out_path = save_xb_score(
-        individuo=population[0],
-        xb_score=xb_score,
+    # 6. Calcular función objetivo con ambas matrices (individuo 0)
+    xb_deb = xie_beni_eb(deb, population[0], all_labels_deb[0])
+    xb_dbb = xie_beni_eb(dbb, population[0], all_labels_dbb[0])
+
+    print(f"  XBEB = {xb_deb:.6f}" + ("  (solución degenerada)" if xb_deb == np.inf else ""))
+    print(f"  XBBB = {xb_dbb:.6f}" + ("  (solución degenerada)" if xb_dbb == np.inf else ""))
+
+    scores_path = save_xb_score(
+        individuo="solucion1",
+        xb_deb=xb_deb,
+        xb_dbb=xb_dbb,
         output_dir=output_dir,
         filename="resultado.csv",
     )
 
-    df = pd.read_csv(out_path, index_col=0)
+    df = pd.read_csv(clusters_path, index_col=0)
     return {
-        "population": population,
-        "all_labels": all_labels,
-        "gene_names": gene_names,
-        "output":     out_path,
-        "dataframe":  df,
+        "population":     population,
+        "all_labels":     all_labels,
+        "all_labels_deb": all_labels_deb,
+        "all_labels_dbb": all_labels_dbb,
+        "gene_names":     gene_names,
+        "output":         clusters_path,
+        "scores_output":  scores_path,
+        "dataframe":      df,
+        "xb_deb":         xb_deb,
+        "xb_dbb":         xb_dbb,
     }
 
 
@@ -572,8 +582,8 @@ def run_medoid_clustering(
 # ══════════════════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
-    deb_path   = r"C:\Users\benja\Desktop\workspace\Thesis\Datasets\Metrics Sources\GSE63511\GSE63511_HVG_top500_dist_spearman.csv"
-    dbb_path   = r"C:\Users\benja\Desktop\workspace\Thesis\Datasets\Metrics Sources\GSE63511\GSE63511_HVG_top500_sim_go3.csv"
+    deb_path   = r"C:\Users\benja\Desktop\workspace\Thesis\Datasets\DGE_DBI\GSE40419_DBE.csv"
+    dbb_path   = r"C:\Users\benja\Desktop\workspace\Thesis\Datasets\DGE_DBI\GSE40419_DBI.csv"
     k          = 4
     pop_size   = 25
     output_dir = r"C:\Users\benja\Desktop\workspace\Thesis\Results"
