@@ -732,16 +732,16 @@ def run_moc_gapbk(
 # ══════════════════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
-    deb_path   = r"C:\Users\benja\Desktop\workspace\Thesis\Datasets\DGE_DBI\GSE40419_DBE.csv"
-    dbb_path   = r"C:\Users\benja\Desktop\workspace\Thesis\Datasets\DGE_DBI\GSE40419_DBI.csv"
+    deb_path   = r"C:\Users\benja\Desktop\workspace\Thesis\Datasets\Matrices\A2_M_DE.csv"
+    dbb_path   = r"C:\Users\benja\Desktop\workspace\Thesis\Datasets\Matrices\A2_M_DB.csv"
     output_dir = r"C:\Users\benja\Desktop\workspace\Thesis\Results"
 
     output = run_moc_gapbk(
         deb_path=deb_path,
         dbb_path=dbb_path,
         k=4,
-        pop_size=100,
-        max_obj_calls=80000,
+        pop_size=50,
+        max_obj_calls=40000,
         output_dir=output_dir,
         crossover_prob=0.80,
         mutation_prob=0.2,
