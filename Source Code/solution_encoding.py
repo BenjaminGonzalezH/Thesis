@@ -118,3 +118,40 @@ def xie_beni(
     OBJ_FUNCTION_CALLS += 1
 
     return xb_deb, xb_dbb
+
+def xie_beni_population(deb_matrix, dbb_matrix, population, labels_pop):
+    xp = cp if _GPU else np
+    global OBJ_FUNCTION_CALLS
+
+    D_stack = xp.stack([xp.asarray(deb_matrix), xp.asarray(dbb_matrix)])  # 1 vez, no por individuo
+    pop = xp.asarray(population)          # (pop_size, k)
+    lbl = xp.asarray(labels_pop)          # (pop_size, n)
+    pop_size, k = pop.shape
+    n = D_stack.shape[1]
+
+    cluster_idx = lbl - 1
+    medoid_per_elem = xp.take_along_axis(pop, cluster_idx, axis=1)   # (pop_size, n)
+
+    idx_mat  = xp.arange(2)[:, None, None]
+    idx_elem = xp.arange(n)[None, None, :]
+    dist_to_medoid = D_stack[idx_mat, idx_elem, medoid_per_elem[None, :, :]]   # (2, pop_size, n)
+    numerator = xp.sum(dist_to_medoid ** 2, axis=2)                            # (2, pop_size)
+
+    # D_med por individuo: se necesita un índice de "individuo" explícito para no
+    # cruzar medoides entre individuos distintos.
+    idx_row = pop[None, :, :, None]     # (1, pop_size, k, 1)
+    idx_col = pop[None, :, None, :]     # (1, pop_size, 1, k)
+    D_med = D_stack[xp.arange(2)[:, None, None, None], idx_row, idx_col]       # (2, pop_size, k, k)
+
+    diag_mask = xp.eye(k, dtype=bool)[None, None, :, :]
+    D_med_off = xp.where(diag_mask, xp.inf, D_med)
+    min_inter = xp.min(D_med_off ** 2, axis=(2, 3))                            # (2, pop_size)
+
+    if _GPU:
+        numerator, min_inter = cp.asnumpy(numerator), cp.asnumpy(min_inter)
+
+    degenerate = min_inter == 0.0
+    xb = np.where(degenerate, np.inf, numerator / (n * np.where(degenerate, 1.0, min_inter)))
+
+    OBJ_FUNCTION_CALLS += pop_size
+    return xb.T   # (pop_size, 2)

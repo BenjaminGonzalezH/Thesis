@@ -6,7 +6,7 @@ solution_encoding, operators, pareto_sorting y performance.
 import numpy as np
 
 import solution_encoding
-from solution_encoding import random_medoids_pop, build_clusters_population, xie_beni
+from solution_encoding import random_medoids_pop, build_clusters_population, xie_beni_population
 from pareto_sorting import non_dominated_sort, crowding_distance
 from operators import binary_tournament_selection, k_point_crossover, controller_random_mutation
 from performance import hypervolume_from_origin
@@ -35,10 +35,7 @@ def evaluate_population(
         return evaluated_population, np.empty((0, 2)), np.empty((0, deb_matrix.shape[0]), dtype=np.int32)
 
     labels_pop = build_clusters_population(deb_matrix, evaluated_population)
-    objectives = np.array([
-        xie_beni(deb_matrix, dbb_matrix, evaluated_population[i], labels_pop[i])
-        for i in range(pop_size)
-    ])
+    objectives = xie_beni_population(deb_matrix, dbb_matrix, evaluated_population, labels_pop)
     return evaluated_population, objectives, labels_pop
 
 

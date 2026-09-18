@@ -6,30 +6,32 @@ distance para 2 objetivos (XB_GE, XB_BI).
 import numpy as np
 
 
-def _dominates(obj_a, obj_b) -> bool:
-    """A domina a B (minimización) si A no es peor en ningún objetivo y es mejor en al menos uno."""
-    not_worse = all(a <= b for a, b in zip(obj_a, obj_b))
-    strictly_better = any(a < b for a, b in zip(obj_a, obj_b))
-    return not_worse and strictly_better
-
+def dominance_matrix(objectives: np.ndarray) -> np.ndarray:
+    obj = np.asarray(objectives)
+    le = obj[:, None, :] <= obj[None, :, :]
+    lt = obj[:, None, :] <  obj[None, :, :]
+    return np.all(le, axis=2) & np.any(lt, axis=2)   # dom[p, q] = True si p domina a q
 
 def non_dominated_sort(objectives) -> list[list[int]]:
-    """Ordena una población en frentes de Pareto (F1, F2, ...) según dominancia."""
-    n = len(objectives)
-    domination_count = [0] * n
-    dominated_by = [[] for _ in range(n)]
-    fronts: list[list[int]] = [[]]
+    """
+    Ordena una población en frentes de Pareto (F1, F2, ...) según dominancia,
+    replicando el procedimiento de NSGA-II. La comparación de dominancia se
+    vectoriza con dominance_matrix (O(n²) en NumPy) en vez de un doble loop
+    de Python con _dominates.
 
-    for p in range(n):
-        for q in range(n):
-            if p == q:
-                continue
-            if _dominates(objectives[p], objectives[q]):
-                dominated_by[p].append(q)
-            elif _dominates(objectives[q], objectives[p]):
-                domination_count[p] += 1
-        if domination_count[p] == 0:
-            fronts[0].append(p)
+    Parámetros
+    ----------
+    objectives : np.ndarray de shape (pop_size, 2), o lista de tuplas
+                 (XBEB, XBBB) — un par de objetivos por individuo.
+    """
+    objectives = np.asarray(objectives)
+    n = len(objectives)
+
+    dom = dominance_matrix(objectives)                  # dom[p, q] = True si p domina a q
+    domination_count = dom.sum(axis=0).tolist()         # cuántos dominan a cada solución p
+    dominated_by = [np.where(dom[p])[0].tolist() for p in range(n)]  # a quiénes domina p
+
+    fronts: list[list[int]] = [[p for p in range(n) if domination_count[p] == 0]]
 
     i = 0
     while fronts[i]:
@@ -42,8 +44,7 @@ def non_dominated_sort(objectives) -> list[list[int]]:
         i += 1
         fronts.append(next_front)
 
-    return fronts[:-1]
-
+    return fronts[:-1] 
 
 def crowding_distance(objectives, front: list[int]) -> dict[int, float]:
     """Crowding distance de las soluciones de un frente, para 2 objetivos."""
