@@ -26,8 +26,8 @@ from pareto_sorting import non_dominated_sort, crowding_distance
 ############################
 def evaluate_objectives(
     medoids: np.ndarray,
-    deb_matrix: np.ndarray,
-    dbb_matrix: np.ndarray,
+    ge_matrix: np.ndarray,
+    bi_matrix: np.ndarray,
 ) -> tuple[float, float]:
     """
     Evalúa (XBEB, XBBB) para UNA única solución de medoides, envolviendo
@@ -37,15 +37,15 @@ def evaluate_objectives(
     Nota
     ----
     Siguiendo la misma libertad de eficiencia adoptada en el NSGA-II
-    (Notes_1), la asignación de clusters se calcula UNA vez con DEB y se
+    (Notes_1), la asignación de clusters se calcula UNA vez con GE y se
     reutiliza para ambos índices Xie-Beni, en lugar de recalcularla también
-    con DBB como sugiere estrictamente la Tabla 1 del paper. Si se decide
+    con bi como sugiere estrictamente la Tabla 1 del paper. Si se decide
     revertir esta libertad, basta con calcular una segunda asignación con
-    build_clusters_population(dbb_matrix, medoids[None, :])[0] y ajustar
+    build_clusters_population(bi_matrix, medoids[None, :])[0] y ajustar
     xie_beni para aceptar labels distintas por matriz.
     """
-    labels = build_clusters_population(deb_matrix, medoids[None, :])[0]
-    return xie_beni(deb_matrix, dbb_matrix, medoids, labels)
+    labels = build_clusters_population(ge_matrix, medoids[None, :])[0]
+    return xie_beni(ge_matrix, bi_matrix, medoids, labels)
 
 
 def _dominates(obj_a, obj_b) -> bool:
@@ -92,8 +92,8 @@ def _select_best(objectives: list[tuple[float, float]]) -> int:
 def path_relinking(
     start: np.ndarray,
     guide: np.ndarray,
-    deb_matrix: np.ndarray,
-    dbb_matrix: np.ndarray,
+    ge_matrix: np.ndarray,
+    bi_matrix: np.ndarray,
     max_obj_calls: int,
     verbose: bool = False,
 ) -> list[np.ndarray]:
@@ -149,7 +149,7 @@ def path_relinking(
             moves = moves[:remaining]
 
         # Evaluación de los cambios realizados en esa iteración.
-        objectives = [evaluate_objectives(cand, deb_matrix, dbb_matrix) for cand in candidates]
+        objectives = [evaluate_objectives(cand, ge_matrix, bi_matrix) for cand in candidates]
 
         # Seleccionar la solución con mejor rendimiento.
         best_idx = _select_best(objectives)
@@ -174,8 +174,8 @@ def path_relinking(
 def multi_objective_path_relinking(
     C1: np.ndarray,
     C2: np.ndarray,
-    deb_matrix: np.ndarray,
-    dbb_matrix: np.ndarray,
+    ge_matrix: np.ndarray,
+    bi_matrix: np.ndarray,
     max_obj_calls: int,
     verbose: bool = False,
 ) -> dict:
@@ -196,12 +196,12 @@ def multi_objective_path_relinking(
 
     if verbose:
         print("\n[MOPR] Trayectoria PR(C1, C2)")
-    traj_c1_c2 = path_relinking(C1, C2, deb_matrix, dbb_matrix, max_obj_calls, verbose=verbose)
+    traj_c1_c2 = path_relinking(C1, C2, ge_matrix, bi_matrix, max_obj_calls, verbose=verbose)
 
     if solution_encoding.OBJ_FUNCTION_CALLS < max_obj_calls:
         if verbose:
             print("\n[MOPR] Trayectoria PR(C2, C1)")
-        traj_c2_c1 = path_relinking(C2, C1, deb_matrix, dbb_matrix, max_obj_calls, verbose=verbose)
+        traj_c2_c1 = path_relinking(C2, C1, ge_matrix, bi_matrix, max_obj_calls, verbose=verbose)
     else:
         traj_c2_c1 = []
         if verbose:
@@ -220,7 +220,7 @@ def multi_objective_path_relinking(
     remaining = max_obj_calls - solution_encoding.OBJ_FUNCTION_CALLS
     n_evaluable = max(0, min(len(pool), remaining))
     pool = pool[:n_evaluable]
-    pool_obj = [evaluate_objectives(ind, deb_matrix, dbb_matrix) for ind in pool]
+    pool_obj = [evaluate_objectives(ind, ge_matrix, bi_matrix) for ind in pool]
 
     if len(pool) == 0:
         f1, f1_obj = pool, []
@@ -281,8 +281,8 @@ def generate_neighborhood(
 
 def pareto_local_search(
     initial_population: np.ndarray,
-    deb_matrix: np.ndarray,
-    dbb_matrix: np.ndarray,
+    ge_matrix: np.ndarray,
+    bi_matrix: np.ndarray,
     max_obj_calls: int,
     initial_objectives: np.ndarray | None = None,
     local_budget: int | None = None,
@@ -304,7 +304,7 @@ def pareto_local_search(
         solo vecino.
     """
     rng = np.random.default_rng(seed)
-    n = deb_matrix.shape[0]
+    n = ge_matrix.shape[0]
 
     calls_start = solution_encoding.OBJ_FUNCTION_CALLS
     local_cap = (calls_start + local_budget) if local_budget is not None else max_obj_calls
@@ -327,7 +327,7 @@ def pareto_local_search(
         else:
             if solution_encoding.OBJ_FUNCTION_CALLS >= effective_max:
                 break
-            obj = evaluate_objectives(sol, deb_matrix, dbb_matrix)
+            obj = evaluate_objectives(sol, ge_matrix, bi_matrix)
         pool[key] = {"solution": sol.copy(), "objectives": obj, "explored": False}
 
     if verbose:
@@ -369,7 +369,7 @@ def pareto_local_search(
         # ── 3. Criterio de aceptación (dominancia) ──────────────────────────
         for neighbor in neighbors:
             neighbor_key = frozenset(neighbor.tolist())
-            neighbor_obj = evaluate_objectives(neighbor, deb_matrix, dbb_matrix)
+            neighbor_obj = evaluate_objectives(neighbor, ge_matrix, bi_matrix)
 
             if not _dominates(C_obj, neighbor_obj):
                 if neighbor_key not in pool:
@@ -398,9 +398,9 @@ def pareto_local_search(
 # (cuota global+local, dominancia vectorizada, sin re-evaluación redundante)
 #######################################################
 
-def build_neighborhood_matrix(deb_matrix: np.ndarray, dbb_matrix: np.ndarray) -> np.ndarray:
-    """Matriz de vecindario M_V (ecuación 3.3, Toledo 2021) = sqrt(DEB² + DBB²)."""
-    return np.sqrt(deb_matrix ** 2 + dbb_matrix ** 2)
+def build_neighborhood_matrix(ge_matrix: np.ndarray, bi_matrix: np.ndarray) -> np.ndarray:
+    """Matriz de vecindario M_V (ecuación 3.3, Toledo 2021) = sqrt(GE² + bi²)."""
+    return np.sqrt(ge_matrix ** 2 + bi_matrix ** 2)
 
 
 def generate_neighborhood_mols(
@@ -453,8 +453,8 @@ def _is_dominated_by_vec(a: np.ndarray, B: np.ndarray) -> np.ndarray:
 
 def _mols_search(
     population: np.ndarray,
-    deb_matrix: np.ndarray,
-    dbb_matrix: np.ndarray,
+    ge_matrix: np.ndarray,
+    bi_matrix: np.ndarray,
     m_v_matrix: np.ndarray,
     neighborhood: float,
     max_obj_calls: int,
@@ -499,7 +499,7 @@ def _mols_search(
         else:
             if solution_encoding.OBJ_FUNCTION_CALLS >= effective_max:
                 break
-            solution_obj = np.asarray(evaluate_objectives(solution, deb_matrix, dbb_matrix), dtype=np.float64)
+            solution_obj = np.asarray(evaluate_objectives(solution, ge_matrix, bi_matrix), dtype=np.float64)
 
         neighbors = generate_neighborhood_mols(solution, m_v_matrix, neighborhood)
         neighbors = [nb for nb in neighbors if frozenset(nb.tolist()) not in seen]
@@ -512,7 +512,7 @@ def _mols_search(
         if not neighbors:
             continue
 
-        neighbor_objs = np.array([evaluate_objectives(nb, deb_matrix, dbb_matrix) for nb in neighbors])
+        neighbor_objs = np.array([evaluate_objectives(nb, ge_matrix, bi_matrix) for nb in neighbors])
 
         if mode == "l_mols":
             accept_mask = ~_dominates_vec(solution_obj, neighbor_objs)
@@ -538,24 +538,24 @@ def _mols_search(
 
 
 def l_mols(
-    population: np.ndarray, deb_matrix: np.ndarray, dbb_matrix: np.ndarray,
+    population: np.ndarray, ge_matrix: np.ndarray, bi_matrix: np.ndarray,
     m_v_matrix: np.ndarray, neighborhood: float, max_obj_calls: int,
     population_objectives: np.ndarray | None = None,
     local_budget: int | None = None, verbose: bool = False,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Large-MOLS (Algoritmo 3.6): acepta un vecino si la solución NO lo domina (no-dominación)."""
-    return _mols_search(population, deb_matrix, dbb_matrix, m_v_matrix, neighborhood,
+    return _mols_search(population, ge_matrix, bi_matrix, m_v_matrix, neighborhood,
                          max_obj_calls, mode="l_mols", population_objectives=population_objectives,
                          local_budget=local_budget, verbose=verbose)
 
 
 def n_mols(
-    population: np.ndarray, deb_matrix: np.ndarray, dbb_matrix: np.ndarray,
+    population: np.ndarray, ge_matrix: np.ndarray, bi_matrix: np.ndarray,
     m_v_matrix: np.ndarray, neighborhood: float, max_obj_calls: int,
     population_objectives: np.ndarray | None = None,
     local_budget: int | None = None, verbose: bool = False,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Narrow-MOLS (Algoritmo 3.7): acepta un vecino solo si DOMINA a la solución (dominación)."""
-    return _mols_search(population, deb_matrix, dbb_matrix, m_v_matrix, neighborhood,
+    return _mols_search(population, ge_matrix, bi_matrix, m_v_matrix, neighborhood,
                          max_obj_calls, mode="n_mols", population_objectives=population_objectives,
                          local_budget=local_budget, verbose=verbose)
