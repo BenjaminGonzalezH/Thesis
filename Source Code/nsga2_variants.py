@@ -38,8 +38,8 @@ from LS import (
 #######################################################
 
 def run_nsga2_MOPR(
-    deb_matrix: np.ndarray,
-    dbb_matrix: np.ndarray,
+    ge_matrix: np.ndarray,
+    bi_matrix: np.ndarray,
     n: int,
     k: int,
     pop_size: int,
@@ -67,7 +67,7 @@ def run_nsga2_MOPR(
 
     population = random_medoids_pop(n=n, k=k, pop_size=pop_size, seed=seed)
     population, objectives, labels_pop = evaluate_population(
-        population, deb_matrix, dbb_matrix, max_obj_function_calls=max_obj_function_calls,
+        population, ge_matrix, bi_matrix, max_obj_function_calls=max_obj_function_calls,
     )
 
     initial_fronts = non_dominated_sort(objectives) if len(objectives) else [[]]
@@ -101,7 +101,7 @@ def run_nsga2_MOPR(
             offspring_candidates[-1] = _ensure_unique(c_last, existing_sets, n, k, rng)
 
         offspring, offspring_objectives, offspring_labels = evaluate_population(
-            offspring_candidates, deb_matrix, dbb_matrix, max_obj_function_calls=max_obj_function_calls,
+            offspring_candidates, ge_matrix, bi_matrix, max_obj_function_calls=max_obj_function_calls,
         )
         if len(offspring) == 0:
             break
@@ -126,7 +126,7 @@ def run_nsga2_MOPR(
                     if frozenset(C1.tolist()) == frozenset(C2.tolist()):
                         continue
                     mopr_result = multi_objective_path_relinking(
-                        C1, C2, deb_matrix, dbb_matrix, max_obj_function_calls, verbose=False,
+                        C1, C2, ge_matrix, bi_matrix, max_obj_function_calls, verbose=False,
                     )
                     if len(mopr_result["f1"]) > 0:
                         pooled.append(mopr_result["f1"])
@@ -148,7 +148,7 @@ def run_nsga2_MOPR(
                 if new_rows:
                     new_solutions = np.stack(new_rows)
                     new_solutions, new_objectives, new_labels = evaluate_population(
-                        new_solutions, deb_matrix, dbb_matrix, max_obj_function_calls=max_obj_function_calls,
+                        new_solutions, ge_matrix, bi_matrix, max_obj_function_calls=max_obj_function_calls,
                     )
                     if len(new_solutions) > 0:
                         combined_population = np.vstack([combined_population, new_solutions])
@@ -213,8 +213,8 @@ def run_nsga2_MOPR(
 #######################################################
 
 def run_nsga2_PLS(
-    deb_matrix: np.ndarray,
-    dbb_matrix: np.ndarray,
+    ge_matrix: np.ndarray,
+    bi_matrix: np.ndarray,
     n: int,
     k: int,
     pop_size: int,
@@ -253,7 +253,7 @@ def run_nsga2_PLS(
 
     population = random_medoids_pop(n=n, k=k, pop_size=pop_size, seed=seed)
     population, objectives, labels_pop = evaluate_population(
-        population, deb_matrix, dbb_matrix, max_obj_function_calls=max_obj_function_calls,
+        population, ge_matrix, bi_matrix, max_obj_function_calls=max_obj_function_calls,
     )
 
     initial_fronts = non_dominated_sort(objectives) if len(objectives) else [[]]
@@ -287,7 +287,7 @@ def run_nsga2_PLS(
             offspring_candidates[-1] = _ensure_unique(c_last, existing_sets, n, k, rng)
 
         offspring, offspring_objectives, offspring_labels = evaluate_population(
-            offspring_candidates, deb_matrix, dbb_matrix, max_obj_function_calls=max_obj_function_calls,
+            offspring_candidates, ge_matrix, bi_matrix, max_obj_function_calls=max_obj_function_calls,
         )
         if len(offspring) == 0:
             break
@@ -307,7 +307,7 @@ def run_nsga2_PLS(
                 pls_pop, pls_obj_list = pareto_local_search(
                     initial_population=f1_pop,
                     initial_objectives=combined_objectives[f1_idx],
-                    deb_matrix=deb_matrix, dbb_matrix=dbb_matrix,
+                    ge_matrix=ge_matrix, bi_matrix=bi_matrix,
                     max_obj_calls=max_obj_function_calls,
                     local_budget=pls_local_budget,
                     seed=int(rng.integers(0, 2**31 - 1)),
@@ -327,7 +327,7 @@ def run_nsga2_PLS(
                         # eso duplicaría el gasto de cuota); solo se
                         # recalculan las asignaciones de cluster, que no
                         # consumen presupuesto.
-                        new_labels = build_clusters_population(deb_matrix, new_solutions)
+                        new_labels = build_clusters_population(ge_matrix, new_solutions)
 
                         combined_population = np.vstack([combined_population, new_solutions])
                         combined_objectives = np.vstack([combined_objectives, new_objectives])
@@ -391,8 +391,8 @@ def run_nsga2_PLS(
 #######################################################
 
 def run_nsga2_MOLS(
-    deb_matrix: np.ndarray,
-    dbb_matrix: np.ndarray,
+    ge_matrix: np.ndarray,
+    bi_matrix: np.ndarray,
     n: int,
     k: int,
     pop_size: int,
@@ -428,13 +428,13 @@ def run_nsga2_MOLS(
     mols_fn = l_mols if mode == "l_mols" else n_mols
 
     # M_V es estática (no depende de la población) -> se calcula UNA sola vez.
-    m_v_matrix = build_neighborhood_matrix(deb_matrix, dbb_matrix)
+    m_v_matrix = build_neighborhood_matrix(ge_matrix, bi_matrix)
 
     rng = np.random.default_rng(seed)
 
     population = random_medoids_pop(n=n, k=k, pop_size=pop_size, seed=seed)
     population, objectives, labels_pop = evaluate_population(
-        population, deb_matrix, dbb_matrix, max_obj_function_calls=max_obj_function_calls,
+        population, ge_matrix, bi_matrix, max_obj_function_calls=max_obj_function_calls,
     )
 
     initial_fronts = non_dominated_sort(objectives) if len(objectives) else [[]]
@@ -468,7 +468,7 @@ def run_nsga2_MOLS(
             offspring_candidates[-1] = _ensure_unique(c_last, existing_sets, n, k, rng)
 
         offspring, offspring_objectives, offspring_labels = evaluate_population(
-            offspring_candidates, deb_matrix, dbb_matrix, max_obj_function_calls=max_obj_function_calls,
+            offspring_candidates, ge_matrix, bi_matrix, max_obj_function_calls=max_obj_function_calls,
         )
         if len(offspring) == 0:
             break
@@ -485,7 +485,7 @@ def run_nsga2_MOLS(
 
             if len(f1_pop) >= 1:
                 mols_pop, mols_obj = mols_fn(
-                    f1_pop, deb_matrix, dbb_matrix, m_v_matrix, neighborhood,
+                    f1_pop, ge_matrix, bi_matrix, m_v_matrix, neighborhood,
                     max_obj_calls=max_obj_function_calls,
                     population_objectives=combined_objectives[f1_idx],
                     local_budget=mols_local_budget,
@@ -498,7 +498,7 @@ def run_nsga2_MOLS(
                     if new_mask.any():
                         new_solutions = mols_pop[new_mask]
                         new_objectives = mols_obj[new_mask]
-                        new_labels = build_clusters_population(deb_matrix, new_solutions)
+                        new_labels = build_clusters_population(ge_matrix, new_solutions)
 
                         combined_population = np.vstack([combined_population, new_solutions])
                         combined_objectives = np.vstack([combined_objectives, new_objectives])

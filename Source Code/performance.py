@@ -109,14 +109,14 @@ def jaccard_population(generations_labels: list[np.ndarray]) -> list[np.ndarray]
     return jaccard_per_generation
 
 
-def hypervolume_from_origin(xb_deb_pop: np.ndarray, xb_dbb_pop: np.ndarray) -> np.ndarray:
+def hypervolume_from_origin(xb_ge_pop: np.ndarray, xb_bi_pop: np.ndarray) -> np.ndarray:
     """
     Hipervolumen de cada solución respecto al origen (0,0): área
     XB_GE · XB_BI. El origen es el punto IDEAL, así que MENOR es mejor.
     """
-    xb_deb_pop = np.asarray(xb_deb_pop, dtype=np.float64)
-    xb_dbb_pop = np.asarray(xb_dbb_pop, dtype=np.float64)
-    return xb_deb_pop * xb_dbb_pop
+    xb_ge_pop = np.asarray(xb_ge_pop, dtype=np.float64)
+    xb_bi_pop = np.asarray(xb_bi_pop, dtype=np.float64)
+    return xb_ge_pop * xb_bi_pop
 
 
 def plot_hypervolume_convergence(

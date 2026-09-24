@@ -74,8 +74,8 @@ def build_clusters_population(
 
 
 def xie_beni(
-    deb_matrix: np.ndarray,
-    dbb_matrix: np.ndarray,
+    ge_matrix: np.ndarray,
+    bi_matrix: np.ndarray,
     medoids: np.ndarray,
     labels: np.ndarray,
 ) -> tuple[float, float]:
@@ -89,7 +89,7 @@ def xie_beni(
 
     global OBJ_FUNCTION_CALLS
 
-    D_stack = xp.stack([xp.asarray(deb_matrix), xp.asarray(dbb_matrix)])
+    D_stack = xp.stack([xp.asarray(ge_matrix), xp.asarray(bi_matrix)])
     med = xp.asarray(medoids)
     n = D_stack.shape[1]
     k = med.shape[0]
@@ -111,19 +111,19 @@ def xie_beni(
         numerator = cp.asnumpy(numerator)
         min_inter = cp.asnumpy(min_inter)
 
-    xb_deb, xb_dbb = numerator / (n * min_inter)
-    xb_deb = np.inf if min_inter[0] == 0.0 else float(xb_deb)
-    xb_dbb = np.inf if min_inter[1] == 0.0 else float(xb_dbb)
+    xb_ge, xb_bi = numerator / (n * min_inter)
+    xb_ge = np.inf if min_inter[0] == 0.0 else float(xb_ge)
+    xb_bi = np.inf if min_inter[1] == 0.0 else float(xb_bi)
 
     OBJ_FUNCTION_CALLS += 1
 
-    return xb_deb, xb_dbb
+    return xb_ge, xb_bi
 
-def xie_beni_population(deb_matrix, dbb_matrix, population, labels_pop):
+def xie_beni_population(ge_matrix, bi_matrix, population, labels_pop):
     xp = cp if _GPU else np
     global OBJ_FUNCTION_CALLS
 
-    D_stack = xp.stack([xp.asarray(deb_matrix), xp.asarray(dbb_matrix)])  # 1 vez, no por individuo
+    D_stack = xp.stack([xp.asarray(ge_matrix), xp.asarray(bi_matrix)])  # 1 vez, no por individuo
     pop = xp.asarray(population)          # (pop_size, k)
     lbl = xp.asarray(labels_pop)          # (pop_size, n)
     pop_size, k = pop.shape

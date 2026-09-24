@@ -14,8 +14,8 @@ from performance import hypervolume_from_origin
 
 def evaluate_population(
     population: np.ndarray,
-    deb_matrix: np.ndarray,
-    dbb_matrix: np.ndarray,
+    ge_matrix: np.ndarray,
+    bi_matrix: np.ndarray,
     max_obj_function_calls: int | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
@@ -32,10 +32,10 @@ def evaluate_population(
     evaluated_population = population[:pop_size]
 
     if pop_size == 0:
-        return evaluated_population, np.empty((0, 2)), np.empty((0, deb_matrix.shape[0]), dtype=np.int32)
+        return evaluated_population, np.empty((0, 2)), np.empty((0, ge_matrix.shape[0]), dtype=np.int32)
 
-    labels_pop = build_clusters_population(deb_matrix, evaluated_population)
-    objectives = xie_beni_population(deb_matrix, dbb_matrix, evaluated_population, labels_pop)
+    labels_pop = build_clusters_population(ge_matrix, evaluated_population)
+    objectives = xie_beni_population(ge_matrix, bi_matrix, evaluated_population, labels_pop)
     return evaluated_population, objectives, labels_pop
 
 
@@ -74,8 +74,8 @@ def _ensure_unique(
 
 
 def run_nsga2(
-    deb_matrix: np.ndarray,
-    dbb_matrix: np.ndarray,
+    ge_matrix: np.ndarray,
+    bi_matrix: np.ndarray,
     n: int,
     k: int,
     pop_size: int,
@@ -92,7 +92,7 @@ def run_nsga2(
 
     population = random_medoids_pop(n=n, k=k, pop_size=pop_size, seed=seed)
     population, objectives, labels_pop = evaluate_population(
-        population, deb_matrix, dbb_matrix, max_obj_function_calls=max_obj_function_calls,
+        population, ge_matrix, bi_matrix, max_obj_function_calls=max_obj_function_calls,
     )
 
     initial_fronts = non_dominated_sort(objectives) if len(objectives) else [[]]
@@ -125,7 +125,7 @@ def run_nsga2(
             offspring_candidates[-1] = _ensure_unique(c_last, existing_sets, n, k, rng)
 
         offspring, offspring_objectives, offspring_labels = evaluate_population(
-            offspring_candidates, deb_matrix, dbb_matrix, max_obj_function_calls=max_obj_function_calls,
+            offspring_candidates, ge_matrix, bi_matrix, max_obj_function_calls=max_obj_function_calls,
         )
 
         if len(offspring) == 0:
