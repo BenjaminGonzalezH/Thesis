@@ -29,20 +29,17 @@ except ImportError:
     print("[backend] CuPy no encontrado → usando NumPy (CPU).")
 
 
-def load_distance_matrix(filepath: Path) -> tuple[np.ndarray, list[str]]:
-    """
-    Lee los archivos csv generados en la etapa de pre-procesamiento de los datasets,
-    cambiando su formato de similitud a matriz de distancia.
-    """
-    df = pd.read_csv(filepath, index_col=0)
-    gene_names = df.index.astype(str).tolist()
-    matrix = 1 - df.values.astype(np.float64)
-
-    print(
-        f"[load] '{filepath.name}' → matriz {matrix.shape[0]}×{matrix.shape[1]} cargada. "
-        f"Primer gen: '{gene_names[0]}', último: '{gene_names[-1]}'."
-    )
-    return matrix, gene_names
+def load_distance_matrix(filepath):
+    data = np.load(filepath, allow_pickle=True)
+    genes = data["genes"].tolist()
+    n = len(genes)
+    iu = np.triu_indices(n, k=1)
+    M = np.zeros((n, n), dtype=np.float32)
+    M[iu] = data["upper"]
+    M += M.T
+    np.fill_diagonal(M, data["diag"])
+    print(f"[load] '{filepath.name}' → matriz {n}×{n}. Primer gen: '{genes[0]}', último: '{genes[-1]}'.")
+    return 1 - M, genes
 
 
 def random_medoids_pop(n: int, k: int, pop_size: int = 1, seed: int | None = None) -> np.ndarray:
