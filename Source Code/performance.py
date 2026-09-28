@@ -7,7 +7,18 @@ from pathlib import Path
 
 import numpy as np
 import matplotlib.pyplot as plt
-import biocluster.clustering.jaccard_values as jv
+
+##################################
+# Configuraciones
+##################################
+try:
+    import cupy as cp
+    _GPU = True
+    print("[backend] CuPy detectado → operaciones vectorizadas en GPU.")
+except ImportError:
+    cp = np
+    _GPU = False
+    print("[backend] CuPy no encontrado → usando NumPy (CPU).")
 
 
 def plot_pareto_fronts(
@@ -84,6 +95,34 @@ def plot_pareto_fronts(
     return str(saved_path) if saved_path is not None else None
 
 
+def jaccard_index_solutions(Solutions_Matrix: np.ndarray) -> np.ndarray:
+    xp = cp if _GPU else np   # mismo patrón que solution_encoding.py
+
+    labels = xp.asarray(Solutions_Matrix)
+    n_solutions, n_genes = labels.shape
+    K = int(labels.max())     # etiquetas 1..K (build_clusters_population es 1-based)
+
+    # One-hot por solución: (n_solutions, n_genes, K) — reemplaza los
+    # vectores de pares O(n²) por una representación O(n·K).
+    one_hot = xp.zeros((n_solutions, n_genes, K), dtype=xp.float32)
+    idx_sol = xp.arange(n_solutions)[:, None]
+    idx_gene = xp.arange(n_genes)[None, :]
+    one_hot[idx_sol, idx_gene, labels - 1] = 1.0
+
+    cluster_sizes = one_hot.sum(axis=1)                                   # (n_solutions, K)
+    same_pairs = (cluster_sizes * (cluster_sizes - 1) / 2).sum(axis=1)    # (n_solutions,) == sum(v_i)
+
+    J = xp.eye(n_solutions, dtype=xp.float64)
+    for i in range(n_solutions):
+        for j in range(i + 1, n_solutions):
+            N = one_hot[i].T @ one_hot[j]              # tabla de contingencia (K, K)
+            r = float((N * (N - 1) / 2).sum())
+            denom = float(same_pairs[i] + same_pairs[j]) - r
+            J[i, j] = J[j, i] = r / denom if denom > 0 else 0.0
+
+    return cp.asnumpy(J) if _GPU else J
+
+
 def jaccard_population(generations_labels: list[np.ndarray]) -> list[np.ndarray]:
     """
     Índice de Jaccard entre individuos (labels) de cada generación, vía
@@ -93,7 +132,7 @@ def jaccard_population(generations_labels: list[np.ndarray]) -> list[np.ndarray]
     jaccard_per_generation = []
 
     for labels_pop in generations_labels:
-        J = jv.jaccard_index_solutions(Solutions_Matrix=labels_pop)
+        J = jaccard_index_solutions(Solutions_Matrix=labels_pop)
         pop_size = J.shape[0]
         iu = np.triu_indices(pop_size, k=1)
         jaccard_per_generation.append(J[iu])
