@@ -63,32 +63,40 @@ def run_nsga2_MOPR(
     resto del ciclo, por lo que puede detener una trayectoria a medio camino
     si el presupuesto se agota (nunca se excede max_obj_function_calls).
     """
+    # Definición de ambiente pseudoaleatorio.
     rng = np.random.default_rng(seed)
 
+    # Creación de población (al azar) y evaluación en función objetivo.
     population = random_medoids_pop(n=n, k=k, pop_size=pop_size, seed=seed)
     population, objectives, labels_pop = evaluate_population(
         population, ge_matrix, bi_matrix, max_obj_function_calls=max_obj_function_calls,
     )
 
+    # Copnstrucción de fronteras iniciales.
     initial_fronts = non_dominated_sort(objectives) if len(objectives) else [[]]
     initial_f1 = initial_fronts[0]
 
+    # Guardado de historial.
     history_objectives = [objectives.copy()]
     history_labels = [labels_pop.copy()]
     history_hv = [hypervolume_from_origin(objectives[:, 0], objectives[:, 1])] if len(objectives) else []
     history_hv_f1 = [hypervolume_from_origin(objectives[initial_f1, 0], objectives[initial_f1, 1])] if len(objectives) else []
 
+    ###########################
+    # ITERACIÓN PRINCIPAL
+    ###########################
     gen = 0
     while solution_encoding.OBJ_FUNCTION_CALLS < max_obj_function_calls and len(population) >= 2:
         gen += 1
         pop_size_actual = len(population)
 
-        # ── Selección + offspring (idéntico a run_nsga2) ────────────────────
+        # -- Selección + offspring (idéntico a run_nsga2) -------------------------------
         ranks, crowding, _ = compute_ranks_and_crowding(objectives)
         parents = binary_tournament_selection(population, ranks, crowding, n_offspring=pop_size_actual, rng=rng)
 
         existing_sets = {frozenset(ind.tolist()) for ind in population}
 
+        # -- Proceso de crossover y mutación  -------------------------------------------
         offspring_candidates = np.empty_like(parents)
         for i in range(0, pop_size_actual - 1, 2):
             c1, c2 = k_point_crossover(parents[i], parents[i + 1], n=n, crossover_prob=crossover_prob, rng=rng)
@@ -155,7 +163,7 @@ def run_nsga2_MOPR(
                         combined_objectives = np.vstack([combined_objectives, new_objectives])
                         combined_labels = np.vstack([combined_labels, new_labels])
 
-        # ── Selección de sobrevivientes (idéntica a run_nsga2) ──────────────
+        # -- Selección de sobrevivientes (idéntica a run_nsga2) -------------------
         _, combined_crowding, combined_fronts = compute_ranks_and_crowding(combined_objectives)
 
         target_size = min(pop_size, len(combined_population))

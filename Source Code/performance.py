@@ -3,14 +3,18 @@ Visualización y métricas de desempeño: frentes de Pareto, diversidad
 (Jaccard) e hipervolumen respecto al origen.
 """
 
-from pathlib import Path
-
-import numpy as np
-import matplotlib.pyplot as plt
+############################
+# Importaciones
+############################
+from pathlib import Path                # Administración global de directorio de archivo.
+import numpy as np                      # Operaciones matemáticas eficientes.
+import matplotlib.pyplot as plt         # Gráficos personalizados.
 
 ##################################
 # Configuraciones
 ##################################
+# Se da opción de ocupar GPU para administrar operaciones vectorizadas
+# y operadas por ese hardware en caso de ser necesario.
 try:
     import cupy as cp
     _GPU = True
@@ -20,6 +24,9 @@ except ImportError:
     _GPU = False
     print("[backend] CuPy no encontrado → usando NumPy (CPU).")
 
+##################################
+# Conjunto de funciones.
+##################################
 
 def plot_pareto_fronts(
     objectives,
@@ -94,7 +101,6 @@ def plot_pareto_fronts(
 
     return str(saved_path) if saved_path is not None else None
 
-
 def jaccard_index_solutions(Solutions_Matrix: np.ndarray) -> np.ndarray:
     xp = cp if _GPU else np   # mismo patrón que solution_encoding.py
 
@@ -122,7 +128,6 @@ def jaccard_index_solutions(Solutions_Matrix: np.ndarray) -> np.ndarray:
 
     return cp.asnumpy(J) if _GPU else J
 
-
 def jaccard_population(generations_labels: list[np.ndarray]) -> list[np.ndarray]:
     """
     Índice de Jaccard entre individuos (labels) de cada generación, vía
@@ -147,7 +152,6 @@ def jaccard_population(generations_labels: list[np.ndarray]) -> list[np.ndarray]
 
     return jaccard_per_generation
 
-
 def hypervolume_from_origin(xb_ge_pop: np.ndarray, xb_bi_pop: np.ndarray) -> np.ndarray:
     """
     Hipervolumen de cada solución respecto al origen (0,0): área
@@ -156,7 +160,6 @@ def hypervolume_from_origin(xb_ge_pop: np.ndarray, xb_bi_pop: np.ndarray) -> np.
     xb_ge_pop = np.asarray(xb_ge_pop, dtype=np.float64)
     xb_bi_pop = np.asarray(xb_bi_pop, dtype=np.float64)
     return xb_ge_pop * xb_bi_pop
-
 
 def plot_hypervolume_convergence(
     hv_per_generation: list[np.ndarray],
