@@ -3,8 +3,29 @@ Ordenamiento por dominancia de Pareto (non-dominated sort) y crowding
 distance para 2 objetivos (XB_GE, XB_BI).
 """
 
-import numpy as np
+############################
+# Importaciones
+############################
+import numpy as np                  # Operaciones matemáticas eficientes.
 
+##################################
+# Conjunto de funciones.
+##################################
+
+def _dominates(obj_a, obj_b) -> bool:
+    """
+    Determina si la solución A domina a la solución B (minimización),
+    según la definición (2) del paper:
+
+        A ≺ B  ⟺  ∀t: P_t(A) ≤ P_t(B)  ∧  ∃t: P_t(A) < P_t(B)
+
+    Parámetros
+    ----------
+    obj_a, obj_b : secuencias de floats (ej. (XBEB, XBBB)).
+    """
+    not_worse = all(a <= b for a, b in zip(obj_a, obj_b))
+    strictly_better = any(a < b for a, b in zip(obj_a, obj_b))
+    return not_worse and strictly_better
 
 def dominance_matrix(objectives: np.ndarray) -> np.ndarray:
     obj = np.asarray(objectives)
