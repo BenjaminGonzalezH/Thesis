@@ -59,7 +59,7 @@ def plot_pareto_fronts(
             continue
 
         color = cmap(rank / max(n_fronts - 1, 1))
-        label = f"F{rank + 1}" if rank < max_fronts_highlighted else None
+        label = f"F{rank}" if rank < max_fronts_highlighted else None
 
         ax.scatter(
             pts_finite[:, 0], pts_finite[:, 1],

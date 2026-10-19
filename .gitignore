@@ -4,3 +4,4 @@
 *stable_id_event.txt
 *.csv
 *.html
+*.npz

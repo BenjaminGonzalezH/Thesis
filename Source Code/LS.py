@@ -1,7 +1,7 @@
 """
 Operadores de búsqueda local (LS) desarrollados en Notes_2-LSOperators.ipynb:
 Multi-Objective Path-Relinking (MOPR), Pareto Local Search (PLS) y
-Large/Narrow-MOLS (L-MOLS / N-MOLS). Se apoyan en solution_encoding y
+MOLS (variantes large / narrow). Se apoyan en solution_encoding y
 pareto_sorting, y son consumidos por nsga2_variants.py.
 
 Referencias:
@@ -106,8 +106,9 @@ def path_relinking(
     ge_matrix: np.ndarray,
     bi_matrix: np.ndarray,
     max_obj_calls: int,
+    start_objective: np.ndarray | None = None,
     verbose: bool = False,
-) -> list[np.ndarray]:
+) -> tuple[list[np.ndarray], list[np.ndarray]]:
     """
     Construye la trayectoria PR(start, guide). Respeta `max_obj_calls`
     (misma cuota GLOBAL de nsga2.py, contra
@@ -115,6 +116,12 @@ def path_relinking(
     alcanza para evaluar todas las combinaciones candidatas de un paso, se
     recorta la lista de candidatas; si se agota antes de terminar, la
     trayectoria vuelve INCOMPLETA (no necesariamente llega a `guide`).
+
+    Retorna (trajectory, trajectory_obj): cada solución de la trayectoria
+    junto con su objetivo (XBEB, XBBB), ya calculado al elegir el mejor
+    movimiento de cada paso — así no se vuelve a evaluar (ni a gastar
+    cuota) después. `start_objective` es el objetivo ya conocido de
+    `start`; si es None, se evalúa (1 llamada).
     """
     set_start = set(start.tolist())
     set_guide = set(guide.tolist())
@@ -124,8 +131,12 @@ def path_relinking(
         "El número de medoides a remover y agregar debe coincidir."
     )
 
+    if start_objective is None:
+        start_objective = evaluate_objectives_population(start[None, :], ge_matrix, bi_matrix)[0]
+
     current = start.copy()
     trajectory = [current.copy()]
+    trajectory_obj = [np.asarray(start_objective, dtype=np.float64)]
 
     if verbose:
         print(f"[PR] start={start.tolist()}  guide={guide.tolist()}")
@@ -167,10 +178,11 @@ def path_relinking(
         current = candidates[best_idx]
         zk_chosen, zl_chosen = moves[best_idx]
 
-        # Establecer como nueva posición de la trayectoria.
+        # Establecer como nueva posición de la trayectoria (con su objetivo).
         to_remove.remove(zk_chosen)
         to_add.remove(zl_chosen)
         trajectory.append(current.copy())
+        trajectory_obj.append(np.asarray(objectives[best_idx], dtype=np.float64))
 
         if verbose:
             xbeb, xbbb = objectives[best_idx]
@@ -179,7 +191,7 @@ def path_relinking(
                 f"(XBEB={xbeb:.6f}, XBBB={xbbb:.6f})  [llamadas={solution_encoding.OBJ_FUNCTION_CALLS}/{max_obj_calls}]"
             )
 
-    return trajectory
+    return trajectory, trajectory_obj
 
 def multi_objective_path_relinking(
     C1: np.ndarray,
@@ -187,13 +199,18 @@ def multi_objective_path_relinking(
     ge_matrix: np.ndarray,
     bi_matrix: np.ndarray,
     max_obj_calls: int,
+    C1_objective: np.ndarray | None = None,
+    C2_objective: np.ndarray | None = None,
     verbose: bool = False,
 ) -> dict:
     """
     Aplica MOPR completo sobre (C1, C2), respetando `max_obj_calls` en cada
-    etapa: si la cuota se agota tras PR(C1,C2), se omite PR(C2,C1); el pool
-    final solo evalúa tantas soluciones como el presupuesto restante permita
-    (si no queda nada, "f1" vuelve vacío).
+    etapa: si la cuota se agota tras PR(C1,C2), se omite PR(C2,C1).
+
+    El pool se arma con los objetivos que ya calculó path_relinking, por lo
+    que NO se evalúa nada adicional (cada solución se paga una sola vez).
+    `C1_objective` / `C2_objective` son los objetivos ya conocidos de C1 y
+    C2 (p.ej. los del F1 de Rv); si son None, se evalúan.
     """
     k = len(C1)
 
@@ -201,47 +218,46 @@ def multi_objective_path_relinking(
         if verbose:
             print("[MOPR] Cuota global ya agotada antes de iniciar.")
         empty = np.empty((0, k), dtype=C1.dtype)
-        return {"pool": empty, "pool_obj": [], "f1": empty, "f1_obj": [],
+        return {"pool": empty, "pool_obj": np.empty((0, 2)), "f1": empty, "f1_obj": np.empty((0, 2)),
                 "trajectory_C1_to_C2": [], "trajectory_C2_to_C1": []}
+
+    if C1_objective is None or C2_objective is None:
+        both = evaluate_objectives_population(np.stack([C1, C2]), ge_matrix, bi_matrix)
+        C1_objective = both[0] if C1_objective is None else C1_objective
+        C2_objective = both[1] if C2_objective is None else C2_objective
 
     if verbose:
         print("\n[MOPR] Trayectoria PR(C1, C2)")
-    traj_c1_c2 = path_relinking(C1, C2, ge_matrix, bi_matrix, max_obj_calls, verbose=verbose)
+    traj_c1_c2, obj_c1_c2 = path_relinking(
+        C1, C2, ge_matrix, bi_matrix, max_obj_calls, start_objective=C1_objective, verbose=verbose)
 
     if solution_encoding.OBJ_FUNCTION_CALLS < max_obj_calls:
         if verbose:
             print("\n[MOPR] Trayectoria PR(C2, C1)")
-        traj_c2_c1 = path_relinking(C2, C1, ge_matrix, bi_matrix, max_obj_calls, verbose=verbose)
+        traj_c2_c1, obj_c2_c1 = path_relinking(
+            C2, C1, ge_matrix, bi_matrix, max_obj_calls, start_objective=C2_objective, verbose=verbose)
     else:
-        traj_c2_c1 = []
+        traj_c2_c1, obj_c2_c1 = [], []
         if verbose:
             print("[MOPR] Cuota global agotada tras PR(C1,C2); se omite PR(C2,C1).")
 
-    # Fusionar y eliminar duplicados por conjunto de medoides.
-    all_solutions = traj_c1_c2 + traj_c2_c1
-    unique_pool: dict[frozenset, np.ndarray] = {}
-    for sol in all_solutions:
+    # Fusionar y eliminar duplicados por conjunto de medoides (conservando
+    # el objetivo ya calculado de cada solución).
+    unique_pool: dict[frozenset, tuple[np.ndarray, np.ndarray]] = {}
+    for sol, obj in zip(traj_c1_c2 + traj_c2_c1, obj_c1_c2 + obj_c2_c1):
         key = frozenset(sol.tolist())
         if key not in unique_pool:
-            unique_pool[key] = sol
-    pool = np.stack(list(unique_pool.values())) if unique_pool else np.empty((0, k), dtype=C1.dtype)
+            unique_pool[key] = (sol, obj)
+    pool = np.stack([s for s, _ in unique_pool.values()])
+    pool_obj = np.stack([o for _, o in unique_pool.values()])
 
-    # Evaluar el pool respetando lo que quede de presupuesto GLOBAL.
-    remaining = max_obj_calls - solution_encoding.OBJ_FUNCTION_CALLS
-    n_evaluable = max(0, min(len(pool), remaining))
-    pool = pool[:n_evaluable]
-    pool_obj = evaluate_objectives_population(pool, ge_matrix, bi_matrix) if len(pool) else np.empty((0, 2))
-
-    if len(pool) == 0:
-        f1, f1_obj = pool, []
-    else:
-        fronts = non_dominated_sort(pool_obj)
-        f1_indices = fronts[0]
-        f1 = pool[f1_indices]
-        f1_obj = pool_obj[f1_indices]
+    fronts = non_dominated_sort(pool_obj)
+    f1_indices = fronts[0]
+    f1 = pool[f1_indices]
+    f1_obj = pool_obj[f1_indices]
 
     if verbose:
-        print(f"\n[MOPR] Pool evaluado: {pool.shape[0]} soluciones "
+        print(f"\n[MOPR] Pool: {pool.shape[0]} soluciones "
               f"(llamadas: {solution_encoding.OBJ_FUNCTION_CALLS}/{max_obj_calls}).")
         print(f"[MOPR] Frente no dominado (F1): {len(f1)} soluciones.")
 
@@ -256,38 +272,54 @@ def multi_objective_path_relinking(
 # MODULO PARETO LOCAL SEARCH (PLS)
 #######################################################
 
-def generate_neighborhood(
-    C: np.ndarray,
-    n: int,
-    rng: np.random.Generator,
-) -> tuple[list[np.ndarray], int, int]:
+def generate_neighborhood(C, n, rng, forbidden, max_neighbors):
     """
-    Genera el vecindario N(C) de una solución, reemplazando un medoide
-    elegido al azar por cada elemento del dataset aún no presente en C.
+    Generación de vecindario de una solución: se elige UNA posición de C al
+    azar y se reemplaza su medoide por una submuestra aleatoria (sin
+    reposición) de genes que no pertenecen a NINGUNA solución del archivo.
 
-    Versión vectorizada: se construyen TODOS los vecinos de una vez con
-    np.tile + asignación de columna, en vez de un loop de Python que hace
-    C.copy() por cada gen candidato.
+    Parámetros
+    ----------
+    forbidden     : np.ndarray — genes usados como medoide en todo el archivo.
+    max_neighbors : int — tamaño máximo de la submuestra, ceil(neighborhood * n).
 
     Retorna
     -------
-    neighbors : list[np.ndarray] — |N(C)| = n - k vecinos.
+    neighbors : np.ndarray (m, k) — m = min(max_neighbors, genes disponibles).
     pos       : int — posición del cromosoma modificada.
     zk        : int — medoide original en esa posición.
     """
-    k = len(C)                          # Número de medoides.
-    pos = int(rng.integers(0, k))       # Se toma un elemento a reemplazar.
-    zk = int(C[pos])                    # Medoide a reemplazar.
+    k = len(C)
+    pos = int(rng.integers(0, k))
+    zk = int(C[pos])
 
-    # Medoides usados y lista de medoides posibles para remplazo.
-    used = set(C.tolist())
-    candidates_z = np.array([z for z in range(n) if z not in used])
+    # Genes disponibles para reemplazo: todos menos los del archivo.
+    available = np.ones(n, dtype=bool)
+    available[forbidden] = False
+    pool_z = np.flatnonzero(available)
 
-    # Generación de vecindario (una sola asignación vectorizada).
-    neighbors_arr = np.tile(C, (len(candidates_z), 1))
-    neighbors_arr[:, pos] = candidates_z
+    if pool_z.size == 0:
+        return np.empty((0, k), dtype=C.dtype), pos, zk
 
-    return list(neighbors_arr), pos, zk
+    # Submuestra aleatoria sin reposición.
+    n_target = min(max_neighbors, pool_z.size)
+    picks = rng.choice(pool_z, size=n_target, replace=False)
+
+    neighbors = np.tile(C, (n_target, 1))
+    neighbors[:, pos] = picks
+    return neighbors, pos, zk
+
+
+def _feasible_mask(neighbors: np.ndarray, ge_matrix: np.ndarray) -> np.ndarray:
+    """
+    Máscara de factibilidad: una solución es factible si ningún cluster
+    queda con menos de 2 elementos. No consume cuota de llamadas.
+    """
+    m, k = neighbors.shape
+    labels = build_clusters_population(ge_matrix, neighbors)       # (m, n), 1-based
+    flat = (labels - 1) + np.arange(m)[:, None] * k                # índice fila*k + cluster
+    counts = np.bincount(flat.ravel(), minlength=m * k).reshape(m, k)
+    return (counts >= 2).all(axis=1)
 
 
 def pareto_local_search(
@@ -299,6 +331,7 @@ def pareto_local_search(
     local_budget: int | None = None,
     seed: int | None = None,
     verbose: bool = False,
+    neighborhood: float = 1.0,
 ) -> tuple[np.ndarray, list[tuple[float, float]]]:
     """
     Aplica Pareto Local Search (PLS), respetando cuota GLOBAL + LOCAL.
@@ -308,28 +341,32 @@ def pareto_local_search(
     initial_objectives : np.ndarray | None — objetivos (XBEB, XBBB) YA
         CONOCIDOS para `initial_population`, en el mismo orden y shape
         (m, 2). Si se proveen, NO se vuelve a llamar evaluate_objectives
-        sobre esas soluciones — evita gastar presupuesto re-confirmando
-        algo que el llamador ya calculó (p.ej. el F1 de Rv en
-        run_nsga2_PLS). Si es None, se evalúan todas desde cero,
+        sobre esas soluciones. Si es None, se evalúan todas desde cero,
         consumiendo len(initial_population) llamadas antes de explorar un
         solo vecino.
+    neighborhood : float en (0, 1] — fracción de n que define el tamaño
+        máximo de N(C): ceil(neighborhood * n) vecinos por exploración.
     """
+    # Inicialización de elementos de números pseudoaleatorios.
     rng = np.random.default_rng(seed)
     n = ge_matrix.shape[0]
+    max_neighbors = int(np.ceil(neighborhood * n))
 
+    # Administración de llamadas restantes vs las permitidas por parametro.
     calls_start = solution_encoding.OBJ_FUNCTION_CALLS
     local_cap = (calls_start + local_budget) if local_budget is not None else max_obj_calls
     effective_max = min(max_obj_calls, local_cap)
 
+    # Verificar existencia de valores en función obj.
     if initial_objectives is not None and len(initial_objectives) != len(initial_population):
         raise ValueError(
             f"'initial_objectives' ({len(initial_objectives)}) debe tener el mismo "
             f"largo que 'initial_population' ({len(initial_population)})."
         )
 
+    # Evaluar o no conjunto de soluciones iniciales según el estado de entrada.
     pool: dict[frozenset, dict] = {}
     if initial_objectives is not None:
-        # Objetivos YA CONOCIDOS por el llamador: no se gasta presupuesto.
         for idx, sol in enumerate(initial_population):
             key = frozenset(sol.tolist())
             if key in pool:
@@ -337,9 +374,6 @@ def pareto_local_search(
             obj = tuple(initial_objectives[idx])
             pool[key] = {"solution": sol.copy(), "objectives": obj, "explored": False}
     else:
-        # Se recorta la selección al presupuesto restante ANTES de evaluar,
-        # replicando el "break" de la versión candidata-por-candidata, pero
-        # evaluando el batch resultante en una sola llamada vectorizada.
         to_eval_keys: list[frozenset] = []
         to_eval_sols: list[np.ndarray] = []
         seen_keys: set[frozenset] = set()
@@ -362,26 +396,36 @@ def pareto_local_search(
               f"(llamadas={solution_encoding.OBJ_FUNCTION_CALLS}/{effective_max}, "
               f"objetivos_precalculados={initial_objectives is not None}).")
 
+    # Iteración según cuota de llamadas disponibles y establecidas por parametros.
     while True:
+        # a. -- Revisión de llamadas en cuotas.
         if solution_encoding.OBJ_FUNCTION_CALLS >= effective_max:
             if verbose:
                 reason = "cuota LOCAL de esta llamada" if effective_max < max_obj_calls else "cuota GLOBAL"
                 print(f"[PLS] {reason} agotada ({solution_encoding.OBJ_FUNCTION_CALLS}/{effective_max}). Deteniendo.")
             break
 
+        # b. -- Soluciones sin explorar.
         unexplored_keys = [key for key, entry in pool.items() if not entry["explored"]]
         if not unexplored_keys:
             if verbose:
                 print(f"[PLS] A0 vacía. Población final |A|={len(pool)}.")
             break
 
-        # ── 1. Selección ────────────────────────────────────────────────────
+        # c. -- Selección de solución a explorar al azar.
         c_key = unexplored_keys[int(rng.integers(0, len(unexplored_keys)))]
         C = pool[c_key]["solution"]
         C_obj = pool[c_key]["objectives"]
 
-        # ── 2. Exploración de vecindad ──────────────────────────────────────
-        neighbors, pos, zk = generate_neighborhood(C, n, rng)
+        # d. -- Vecindad: un medoide de C reemplazado por una submuestra de
+        # genes que no pertenecen a ninguna solución del archivo.
+        forbidden = np.unique(np.stack([e["solution"] for e in pool.values()]))
+        neighbors, pos, zk = generate_neighborhood(C, n, rng, forbidden, max_neighbors)
+
+        # Filtro de factibilidad (clusters con >= 2 elementos). Va ANTES de
+        # recortar por presupuesto para no gastar llamadas en infactibles.
+        if len(neighbors):
+            neighbors = neighbors[_feasible_mask(neighbors, ge_matrix)]
 
         remaining = effective_max - solution_encoding.OBJ_FUNCTION_CALLS
         if remaining <= 0:
@@ -393,27 +437,33 @@ def pareto_local_search(
             print(f"[PLS] C={C.tolist()}  (XBEB={C_obj[0]:.4f}, XBBB={C_obj[1]:.4f})  "
                   f"reemplazando posición {pos} (z_{zk}), |N(C)|={len(neighbors)}")
 
-        # ── 3. Criterio de aceptación (dominancia) ──────────────────────────
-        if not neighbors:
-            if c_key in pool:
-                pool[c_key]["explored"] = True
+        # e. -- Sin vecinos factibles: C queda explorada.
+        if len(neighbors) == 0:
+            pool[c_key]["explored"] = True
             continue
 
-        neighbor_objs = evaluate_objectives_population(np.stack(neighbors), ge_matrix, bi_matrix)
-        for neighbor, neighbor_obj in zip(neighbors, neighbor_objs):
-            neighbor_key = frozenset(neighbor.tolist())
-            neighbor_obj = tuple(neighbor_obj)
+        # f. -- Criterio de aceptación: ordenamiento no dominado CONJUNTO sobre
+        # vecinos + archivo; el nuevo archivo es el frente F1 de esa unión.
+        neighbor_objs = evaluate_objectives_population(neighbors, ge_matrix, bi_matrix)
 
-            if not _dominates(C_obj, neighbor_obj):
-                if neighbor_key not in pool:
-                    pool[neighbor_key] = {"solution": neighbor, "objectives": neighbor_obj, "explored": False}
-                dominated_keys = [
-                    key for key, entry in pool.items()
-                    if key != neighbor_key and _dominates(neighbor_obj, entry["objectives"])
-                ]
-                for key in dominated_keys:
-                    del pool[key]
+        keys = list(pool.keys())
+        all_objs = [pool[key]["objectives"] for key in keys] + [tuple(o) for o in neighbor_objs]
+        f1 = set(non_dominated_sort(all_objs)[0])
 
+        new_pool: dict[frozenset, dict] = {}
+        for i, key in enumerate(keys):
+            if i in f1:
+                new_pool[key] = pool[key]                      # hereda 'explored'
+        for j, (neighbor, neighbor_obj) in enumerate(zip(neighbors, neighbor_objs)):
+            if len(keys) + j in f1:
+                new_pool[frozenset(neighbor.tolist())] = {
+                    "solution": neighbor,
+                    "objectives": tuple(neighbor_obj),
+                    "explored": False,
+                }
+        pool = new_pool
+
+        # C se marca explorada aunque haya sido dominada y eliminada.
         if c_key in pool:
             pool[c_key]["explored"] = True
 
@@ -427,22 +477,19 @@ def pareto_local_search(
 
 
 #######################################################
-# MODULO N-MOLS / L-MOLS
+# MODULO MOLS
 # (cuota global+local, dominancia vectorizada, sin re-evaluación redundante)
 #######################################################
-
-def build_neighborhood_matrix(ge_matrix: np.ndarray, bi_matrix: np.ndarray) -> np.ndarray:
-    """Matriz de vecindario M_V (ecuación 3.3, Toledo 2021) = sqrt(GE² + bi²)."""
-    return np.sqrt(ge_matrix ** 2 + bi_matrix ** 2)
-
 
 def generate_neighborhood_mols(
     C: np.ndarray,
     m_v_matrix: np.ndarray,
     neighborhood: float,
 ) -> list[np.ndarray]:
-    """Neighborhood(C, M_V) según ecuación 3.4: un medoide reemplazado por
-    un gen no presente con M_V(reemplazado, reemplazo) <= neighborhood."""
+    """
+    Neighborhood(C, M_V) según ecuación 3.4: un medoide reemplazado por
+    un gen no presente con M_V(reemplazado, reemplazo) <= neighborhood.
+    """
     k = len(C)
     bloques = []
 
@@ -465,8 +512,6 @@ def generate_neighborhood_mols(
 
     return list(np.vstack(bloques))
 
-
-
 def _dominates_vec(a: np.ndarray, B: np.ndarray) -> np.ndarray:
     """True donde 'a' domina a B[i] (minimización). a:(2,), B:(m,2)."""
     a = np.asarray(a, dtype=np.float64)
@@ -474,7 +519,6 @@ def _dominates_vec(a: np.ndarray, B: np.ndarray) -> np.ndarray:
     not_worse = np.all(a <= B, axis=1)
     strictly_better = np.any(a < B, axis=1)
     return not_worse & strictly_better
-
 
 def _is_dominated_by_vec(a: np.ndarray, B: np.ndarray) -> np.ndarray:
     """Inverso de _dominates_vec: True donde B[i] domina a 'a'."""
@@ -484,8 +528,7 @@ def _is_dominated_by_vec(a: np.ndarray, B: np.ndarray) -> np.ndarray:
     strictly_better = np.any(B < a, axis=1)
     return not_worse & strictly_better
 
-
-def _mols_search(
+def mols(
     population: np.ndarray,
     ge_matrix: np.ndarray,
     bi_matrix: np.ndarray,
@@ -498,10 +541,14 @@ def _mols_search(
     verbose: bool = False,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
-    Núcleo compartido de L-MOLS y N-MOLS (Algoritmos 3.6 y 3.7, Toledo 2021).
+    MOLS (Algoritmos 3.6 y 3.7, Toledo 2021). `mode` selecciona el criterio de aceptación:
+    "large"  → acepta un vecino si la solución NO lo domina (no-dominación).
+    "narrow" → acepta un vecino solo si DOMINA a la solución (dominación).
 
     Parámetros
     ----------
+    m_v_matrix: np.ndarray - Considerar que puede ser la propia matriz de
+        expresión o la de información biológica.
     max_obj_calls : int — cuota GLOBAL del run completo (contra
         solution_encoding.OBJ_FUNCTION_CALLS).
     population_objectives : np.ndarray | None — objetivos (XBEB, XBBB) YA
@@ -512,21 +559,27 @@ def _mols_search(
         pareto_local_search); evita que una invocación dentro del ciclo de
         NSGA-II consuma TODO el presupuesto restante de una vez.
     """
-    assert mode in ("l_mols", "n_mols"), "mode debe ser 'l_mols' o 'n_mols'."
+    # Comprobación de modo para aceptar soluciones.
+    assert mode in ("large", "narrow"), "mode debe ser 'large' o 'narrow'."
     if population_objectives is not None and len(population_objectives) != len(population):
         raise ValueError(
             f"'population_objectives' ({len(population_objectives)}) debe tener el mismo "
             f"largo que 'population' ({len(population)})."
         )
 
+    # Administración de llamadas a función objetivo.
     calls_start = solution_encoding.OBJ_FUNCTION_CALLS
     local_cap = (calls_start + local_budget) if local_budget is not None else max_obj_calls
     effective_max = min(max_obj_calls, local_cap)
 
+    # Inicialización de conjuntos para aplicar MOLS.
     archive: list[np.ndarray] = []
     archive_obj: list[np.ndarray] = []
     seen = {frozenset(sol.tolist()) for sol in population}
 
+    # Por cada solución en el conjunto de entrada se debe
+    # asegurar que todas las soluciones tengan valores en
+    # función objetivo.
     for idx, solution in enumerate(population):
         if population_objectives is not None:
             solution_obj = np.asarray(population_objectives[idx], dtype=np.float64)
@@ -535,9 +588,11 @@ def _mols_search(
                 break
             solution_obj = np.asarray(evaluate_objectives(solution, ge_matrix, bi_matrix), dtype=np.float64)
 
+        # Generar vecindario según matriz Mv.
         neighbors = generate_neighborhood_mols(solution, m_v_matrix, neighborhood)
         neighbors = [nb for nb in neighbors if frozenset(nb.tolist()) not in seen]
 
+        # Evaluar soluciones según cuota de llamadas disponibles.
         remaining = effective_max - solution_encoding.OBJ_FUNCTION_CALLS
         if remaining <= 0:
             break
@@ -545,14 +600,15 @@ def _mols_search(
             neighbors = neighbors[:remaining]
         if not neighbors:
             continue
-
         neighbor_objs = evaluate_objectives_population(np.stack(neighbors), ge_matrix, bi_matrix)
 
-        if mode == "l_mols":
+        # Establecer condiciones para seleccionar soluciones aceptadas.
+        if mode == "large":
             accept_mask = ~_dominates_vec(solution_obj, neighbor_objs)
         else:
             accept_mask = _is_dominated_by_vec(solution_obj, neighbor_objs)
 
+        # Ingreso de nuevas soluciones al conjunto (sálida).
         for nb, nb_obj, accepted in zip(neighbors, neighbor_objs, accept_mask):
             if accepted:
                 key = frozenset(nb.tolist())
@@ -569,27 +625,3 @@ def _mols_search(
         return np.empty((0, population.shape[1]), dtype=population.dtype), np.empty((0, 2))
 
     return np.stack(archive), np.asarray(archive_obj, dtype=np.float64)
-
-
-def l_mols(
-    population: np.ndarray, ge_matrix: np.ndarray, bi_matrix: np.ndarray,
-    m_v_matrix: np.ndarray, neighborhood: float, max_obj_calls: int,
-    population_objectives: np.ndarray | None = None,
-    local_budget: int | None = None, verbose: bool = False,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Large-MOLS (Algoritmo 3.6): acepta un vecino si la solución NO lo domina (no-dominación)."""
-    return _mols_search(population, ge_matrix, bi_matrix, m_v_matrix, neighborhood,
-                         max_obj_calls, mode="l_mols", population_objectives=population_objectives,
-                         local_budget=local_budget, verbose=verbose)
-
-
-def n_mols(
-    population: np.ndarray, ge_matrix: np.ndarray, bi_matrix: np.ndarray,
-    m_v_matrix: np.ndarray, neighborhood: float, max_obj_calls: int,
-    population_objectives: np.ndarray | None = None,
-    local_budget: int | None = None, verbose: bool = False,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Narrow-MOLS (Algoritmo 3.7): acepta un vecino solo si DOMINA a la solución (dominación)."""
-    return _mols_search(population, ge_matrix, bi_matrix, m_v_matrix, neighborhood,
-                         max_obj_calls, mode="n_mols", population_objectives=population_objectives,
-                         local_budget=local_budget, verbose=verbose)

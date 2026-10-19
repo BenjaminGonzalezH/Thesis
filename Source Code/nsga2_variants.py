@@ -6,7 +6,7 @@ dominado F1 de Rv = Pv ∪ Qv, antes de la selección de sobrevivientes.
 
 - run_nsga2_MOPR  : agrega Multi-Objective Path-Relinking (intensificación).
 - run_nsga2_PLS   : agrega Pareto Local Search (diversificación).
-- run_nsga2_MOLS  : agrega L-MOLS o N-MOLS, según `mode`.
+- run_nsga2_MOLS  : agrega MOLS (large o narrow, según `mode`).
 
 El resto del ciclo (selección por torneo, crossover, mutación, truncamiento
 por rank+crowding) es IDÉNTICO a run_nsga2 (nsga2.py). Todas comparten la
@@ -19,16 +19,14 @@ import numpy as np
 
 import solution_encoding
 from solution_encoding import random_medoids_pop, build_clusters_population
-from pareto_sorting import non_dominated_sort
+from pareto_sorting import non_dominated_sort, crowding_distance
 from operators import binary_tournament_selection, k_point_crossover, controller_random_mutation
 from performance import hypervolume_from_origin
 from nsga2 import evaluate_population, compute_ranks_and_crowding, _ensure_unique
 from LS import (
     multi_objective_path_relinking,
     pareto_local_search,
-    build_neighborhood_matrix,
-    l_mols,
-    n_mols,
+    mols,
 )
 
 
@@ -123,42 +121,46 @@ def run_nsga2_MOPR(
         if solution_encoding.OBJ_FUNCTION_CALLS < max_obj_function_calls:
             rv_fronts = non_dominated_sort(combined_objectives)
             f1_idx = rv_fronts[0]
+            f1_crowding = crowding_distance(combined_objectives, f1_idx)
+            f1_idx = sorted(f1_idx, key=lambda i: f1_crowding[i], reverse=True)
             f1_pop = combined_population[f1_idx]
 
             if len(f1_pop) >= 2:
-                pooled = [f1_pop]
+                f1_obj = combined_objectives[f1_idx]
+                pooled_sols, pooled_objs = [], []
                 for i in range(len(f1_pop) - 1):
                     if solution_encoding.OBJ_FUNCTION_CALLS >= max_obj_function_calls:
                         break
                     C1, C2 = f1_pop[i], f1_pop[i + 1]
                     if frozenset(C1.tolist()) == frozenset(C2.tolist()):
                         continue
+                    # C1 y C2 ya están evaluados (F1 de Rv): se pasan sus objetivos
+                    # para no volver a evaluarlos.
                     mopr_result = multi_objective_path_relinking(
-                        C1, C2, ge_matrix, bi_matrix, max_obj_function_calls, verbose=False,
+                        C1, C2, ge_matrix, bi_matrix, max_obj_function_calls,
+                        C1_objective=f1_obj[i], C2_objective=f1_obj[i + 1], verbose=False,
                     )
                     if len(mopr_result["f1"]) > 0:
-                        pooled.append(mopr_result["f1"])
+                        pooled_sols.append(mopr_result["f1"])
+                        pooled_objs.append(mopr_result["f1_obj"])
 
-                mopr_pop = np.vstack(pooled)
-                seen = set()
-                unique_rows = []
-                for sol in mopr_pop:
-                    key = frozenset(sol.tolist())
-                    if key not in seen:
-                        seen.add(key)
-                        unique_rows.append(sol)
-                mopr_pop = np.stack(unique_rows)
+                # Solo se agregan las soluciones REALMENTE nuevas que MOPR aportó.
+                # Sus objetivos ya fueron calculados dentro de path_relinking
+                # (y pagados contra la cuota), por lo que NO se re-evalúan.
+                if pooled_sols:
+                    existing_keys = {frozenset(sol.tolist()) for sol in combined_population}
+                    new_rows, new_objs = [], []
+                    for sol, obj in zip(np.vstack(pooled_sols), np.vstack(pooled_objs)):
+                        key = frozenset(sol.tolist())
+                        if key not in existing_keys:
+                            existing_keys.add(key)
+                            new_rows.append(sol)
+                            new_objs.append(obj)
+                    if new_rows:
+                        new_solutions = np.stack(new_rows)
+                        new_objectives = np.stack(new_objs)
+                        new_labels = build_clusters_population(ge_matrix, new_solutions)
 
-                # Solo evaluar (y agregar) las soluciones REALMENTE nuevas
-                # que MOPR aportó — evita recalcular objetivos ya conocidos.
-                existing_keys = {frozenset(sol.tolist()) for sol in combined_population}
-                new_rows = [sol for sol in mopr_pop if frozenset(sol.tolist()) not in existing_keys]
-                if new_rows:
-                    new_solutions = np.stack(new_rows)
-                    new_solutions, new_objectives, new_labels = evaluate_population(
-                        new_solutions, ge_matrix, bi_matrix, max_obj_function_calls=max_obj_function_calls,
-                    )
-                    if len(new_solutions) > 0:
                         combined_population = np.vstack([combined_population, new_solutions])
                         combined_objectives = np.vstack([combined_objectives, new_objectives])
                         combined_labels = np.vstack([combined_labels, new_labels])
@@ -230,6 +232,7 @@ def run_nsga2_PLS(
     crossover_prob: float = 0.80,
     mutation_prob: float = 0.01,
     pls_local_budget: int | None = None,
+    pls_neighborhood: float = 1.0,
     seed: int | None = None,
 ) -> dict:
     """
@@ -252,6 +255,11 @@ def run_nsga2_PLS(
         completas). Se recomienda fijarlo como una fracción de
         max_obj_function_calls, análogo al parámetro `ls_budget` de
         Toledo (2021), Sección 3.3.6.
+
+    pls_neighborhood : float en (0, 1] — fracción de n que define el tamaño
+        máximo del vecindario de PLS (ceil(pls_neighborhood * n) vecinos por
+        exploración, muestreados al azar entre los genes que no son medoide
+        de ninguna solución del archivo). 1.0 = todos los genes disponibles.
 
     Criterio de paro EXACTO: PLS comparte la MISMA cuota global
     (solution_encoding.OBJ_FUNCTION_CALLS vs max_obj_function_calls) que el
@@ -318,6 +326,7 @@ def run_nsga2_PLS(
                     ge_matrix=ge_matrix, bi_matrix=bi_matrix,
                     max_obj_calls=max_obj_function_calls,
                     local_budget=pls_local_budget,
+                    neighborhood=pls_neighborhood,
                     seed=int(rng.integers(0, 2**31 - 1)),
                     verbose=False,
                 )
@@ -394,13 +403,14 @@ def run_nsga2_PLS(
 
 
 #######################################################
-# run_nsga2_MOLS: variante de run_nsga2 que agrega N-MOLS o L-MOLS
-# (según `mode`) como estrategia de búsqueda local
+# run_nsga2_MOLS: variante de run_nsga2 que agrega MOLS
+# (large o narrow, según `mode`) como estrategia de búsqueda local
 #######################################################
 
 def run_nsga2_MOLS(
     ge_matrix: np.ndarray,
     bi_matrix: np.ndarray,
+    m_v_matrix: np.ndarray,
     n: int,
     k: int,
     pop_size: int,
@@ -413,7 +423,7 @@ def run_nsga2_MOLS(
     seed: int | None = None,
 ) -> dict:
     """
-    Variante de run_nsga2 que agrega L-MOLS o N-MOLS (Haidine & Lehnert,
+    Variante de run_nsga2 que agrega MOLS (Haidine & Lehnert,
     2008; Toledo 2021) como estrategia de búsqueda local: tras construir
     Rv = Pv ∪ Qv, se extrae su frente no dominado F1 y se aplica el
     operador elegido (`mode`); las soluciones NUEVAS se agregan de vuelta
@@ -422,7 +432,11 @@ def run_nsga2_MOLS(
 
     Parámetros
     ----------
-    mode                : "l_mols" | "n_mols".
+    m_v_matrix          : np.ndarray — matriz sobre la que se define el vecindario
+                          M_V; puede ser la de expresión (ge_matrix) o la de
+                          información biológica (bi_matrix). `neighborhood` es un
+                          radio en la escala de esta matriz.
+    mode                : "large" | "narrow".
     neighborhood        : float — radio de vecindario (parámetro del
                           algoritmo, ver Sección 3.3.6 de Toledo).
     mols_local_budget   : int | None — cuota POR GENERACIÓN para MOLS (ver
@@ -432,11 +446,7 @@ def run_nsga2_MOLS(
     Criterio de paro EXACTO: MOLS comparte la MISMA cuota global
     (solution_encoding.OBJ_FUNCTION_CALLS vs max_obj_function_calls).
     """
-    assert mode in ("l_mols", "n_mols"), "mode debe ser 'l_mols' o 'n_mols'."
-    mols_fn = l_mols if mode == "l_mols" else n_mols
-
-    # M_V es estática (no depende de la población) -> se calcula UNA sola vez.
-    m_v_matrix = build_neighborhood_matrix(ge_matrix, bi_matrix)
+    assert mode in ("large", "narrow"), "mode debe ser 'large' o 'narrow'."
 
     rng = np.random.default_rng(seed)
 
@@ -492,9 +502,9 @@ def run_nsga2_MOLS(
             f1_pop = combined_population[f1_idx]
 
             if len(f1_pop) >= 1:
-                mols_pop, mols_obj = mols_fn(
+                mols_pop, mols_obj = mols(
                     f1_pop, ge_matrix, bi_matrix, m_v_matrix, neighborhood,
-                    max_obj_calls=max_obj_function_calls,
+                    max_obj_calls=max_obj_function_calls, mode=mode,
                     population_objectives=combined_objectives[f1_idx],
                     local_budget=mols_local_budget,
                     verbose=False,
