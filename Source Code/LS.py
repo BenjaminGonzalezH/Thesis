@@ -481,6 +481,21 @@ def pareto_local_search(
 # (cuota global+local, dominancia vectorizada, sin re-evaluación redundante)
 #######################################################
 
+def build_neighborhood_matrix(ge_matrix: np.ndarray, bi_matrix: np.ndarray, source: str = "BOTH") -> np.ndarray:
+    """
+    Matriz M_V sobre la que MOLS define el vecindario. `source` selecciona:
+    "GE"   → solo expresión (ge_matrix).
+    "BI"   → solo información biológica (bi_matrix).
+    "BOTH" → combinación sqrt(GE² + BI²) (distancia euclidiana conjunta).
+    """
+    source = source.upper()
+    assert source in ("GE", "BI", "BOTH"), "source debe ser 'GE', 'BI' o 'BOTH'."
+    if source == "GE":
+        return ge_matrix
+    if source == "BI":
+        return bi_matrix
+    return np.sqrt(ge_matrix ** 2 + bi_matrix ** 2)
+
 def generate_neighborhood_mols(
     C: np.ndarray,
     m_v_matrix: np.ndarray,

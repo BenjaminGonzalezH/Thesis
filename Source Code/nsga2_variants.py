@@ -21,7 +21,7 @@ import solution_encoding
 from solution_encoding import random_medoids_pop, build_clusters_population
 from pareto_sorting import non_dominated_sort, crowding_distance
 from operators import binary_tournament_selection, k_point_crossover, controller_random_mutation
-from performance import hypervolume_from_origin
+from performance import hypervolume_f1
 from nsga2 import evaluate_population, compute_ranks_and_crowding, _ensure_unique
 from LS import (
     multi_objective_path_relinking,
@@ -77,8 +77,7 @@ def run_nsga2_MOPR(
     # Guardado de historial.
     history_objectives = [objectives.copy()]
     history_labels = [labels_pop.copy()]
-    history_hv = [hypervolume_from_origin(objectives[:, 0], objectives[:, 1])] if len(objectives) else []
-    history_hv_f1 = [hypervolume_from_origin(objectives[initial_f1, 0], objectives[initial_f1, 1])] if len(objectives) else []
+    history_hv_f1 = [hypervolume_f1(objectives[initial_f1])] if len(objectives) else []
 
     ###########################
     # ITERACIÓN PRINCIPAL
@@ -185,19 +184,16 @@ def run_nsga2_MOPR(
 
         current_fronts = non_dominated_sort(objectives)
         f1_indices = current_fronts[0]
-        f1_hv = hypervolume_from_origin(objectives[f1_indices, 0], objectives[f1_indices, 1])
+        f1_hv = hypervolume_f1(objectives[f1_indices])
 
         history_objectives.append(objectives.copy())
         history_labels.append(labels_pop.copy())
-        history_hv.append(hypervolume_from_origin(objectives[:, 0], objectives[:, 1]))
         history_hv_f1.append(f1_hv)
 
-        mean_hv = np.mean(history_hv[-1])
-        mean_hv_f1 = np.mean(f1_hv)
         print(
             f"[gen {gen:>3}] llamadas = {solution_encoding.OBJ_FUNCTION_CALLS:>6}/{max_obj_function_calls}  |  "
             f"población = {len(population)}  |  F1 = {len(f1_indices)}  |  "
-            f"HV promedio = {mean_hv:.6f}  |  HV F1 promedio = {mean_hv_f1:.6f}"
+            f"HV F1 = {f1_hv:.6f}"
         )
 
     print(f"\nCriterio de paro EXACTO: {solution_encoding.OBJ_FUNCTION_CALLS}/{max_obj_function_calls} llamadas a la función objetivo, {gen} generaciones completadas.")
@@ -209,10 +205,8 @@ def run_nsga2_MOPR(
         "fronts": non_dominated_sort(objectives),
         "history_objectives": history_objectives,
         "history_labels": history_labels,
-        "history_hv": history_hv,
-        "history_hv_mean": [float(np.mean(hv)) for hv in history_hv],
         "history_hv_f1": history_hv_f1,
-        "history_hv_f1_mean": [float(np.mean(hv)) for hv in history_hv_f1],
+        "history_hv_f1_mean": [float(hv) for hv in history_hv_f1],
         "generations_run": gen,
     }
 
@@ -277,8 +271,7 @@ def run_nsga2_PLS(
 
     history_objectives = [objectives.copy()]
     history_labels = [labels_pop.copy()]
-    history_hv = [hypervolume_from_origin(objectives[:, 0], objectives[:, 1])] if len(objectives) else []
-    history_hv_f1 = [hypervolume_from_origin(objectives[initial_f1, 0], objectives[initial_f1, 1])] if len(objectives) else []
+    history_hv_f1 = [hypervolume_f1(objectives[initial_f1])] if len(objectives) else []
 
     gen = 0
     while solution_encoding.OBJ_FUNCTION_CALLS < max_obj_function_calls and len(population) >= 2:
@@ -370,19 +363,16 @@ def run_nsga2_PLS(
 
         current_fronts = non_dominated_sort(objectives)
         f1_indices = current_fronts[0]
-        f1_hv = hypervolume_from_origin(objectives[f1_indices, 0], objectives[f1_indices, 1])
+        f1_hv = hypervolume_f1(objectives[f1_indices])
 
         history_objectives.append(objectives.copy())
         history_labels.append(labels_pop.copy())
-        history_hv.append(hypervolume_from_origin(objectives[:, 0], objectives[:, 1]))
         history_hv_f1.append(f1_hv)
 
-        mean_hv = np.mean(history_hv[-1])
-        mean_hv_f1 = np.mean(f1_hv)
         print(
             f"[gen {gen:>3}] llamadas = {solution_encoding.OBJ_FUNCTION_CALLS:>6}/{max_obj_function_calls}  |  "
             f"población = {len(population)}  |  F1 = {len(f1_indices)}  |  "
-            f"HV promedio = {mean_hv:.6f}  |  HV F1 promedio = {mean_hv_f1:.6f}"
+            f"HV F1 = {f1_hv:.6f}"
         )
 
     print(f"\nCriterio de paro EXACTO: {solution_encoding.OBJ_FUNCTION_CALLS}/{max_obj_function_calls} llamadas a la función objetivo, {gen} generaciones completadas.")
@@ -394,10 +384,8 @@ def run_nsga2_PLS(
         "fronts": non_dominated_sort(objectives),
         "history_objectives": history_objectives,
         "history_labels": history_labels,
-        "history_hv": history_hv,
-        "history_hv_mean": [float(np.mean(hv)) for hv in history_hv],
         "history_hv_f1": history_hv_f1,
-        "history_hv_f1_mean": [float(np.mean(hv)) for hv in history_hv_f1],
+        "history_hv_f1_mean": [float(hv) for hv in history_hv_f1],
         "generations_run": gen,
     }
 
@@ -460,8 +448,7 @@ def run_nsga2_MOLS(
 
     history_objectives = [objectives.copy()]
     history_labels = [labels_pop.copy()]
-    history_hv = [hypervolume_from_origin(objectives[:, 0], objectives[:, 1])] if len(objectives) else []
-    history_hv_f1 = [hypervolume_from_origin(objectives[initial_f1, 0], objectives[initial_f1, 1])] if len(objectives) else []
+    history_hv_f1 = [hypervolume_f1(objectives[initial_f1])] if len(objectives) else []
 
     gen = 0
     while solution_encoding.OBJ_FUNCTION_CALLS < max_obj_function_calls and len(population) >= 2:
@@ -542,19 +529,16 @@ def run_nsga2_MOLS(
 
         current_fronts = non_dominated_sort(objectives)
         f1_indices = current_fronts[0]
-        f1_hv = hypervolume_from_origin(objectives[f1_indices, 0], objectives[f1_indices, 1])
+        f1_hv = hypervolume_f1(objectives[f1_indices])
 
         history_objectives.append(objectives.copy())
         history_labels.append(labels_pop.copy())
-        history_hv.append(hypervolume_from_origin(objectives[:, 0], objectives[:, 1]))
         history_hv_f1.append(f1_hv)
 
-        mean_hv = np.mean(history_hv[-1])
-        mean_hv_f1 = np.mean(f1_hv)
         print(
             f"[gen {gen:>3}] llamadas = {solution_encoding.OBJ_FUNCTION_CALLS:>6}/{max_obj_function_calls}  |  "
             f"población = {len(population)}  |  F1 = {len(f1_indices)}  |  "
-            f"HV promedio = {mean_hv:.6f}  |  HV F1 promedio = {mean_hv_f1:.6f}"
+            f"HV F1 = {f1_hv:.6f}"
         )
 
     print(f"\nCriterio de paro EXACTO: {solution_encoding.OBJ_FUNCTION_CALLS}/{max_obj_function_calls} llamadas a la función objetivo, {gen} generaciones completadas.")
@@ -566,9 +550,7 @@ def run_nsga2_MOLS(
         "fronts": non_dominated_sort(objectives),
         "history_objectives": history_objectives,
         "history_labels": history_labels,
-        "history_hv": history_hv,
-        "history_hv_mean": [float(np.mean(hv)) for hv in history_hv],
         "history_hv_f1": history_hv_f1,
-        "history_hv_f1_mean": [float(np.mean(hv)) for hv in history_hv_f1],
+        "history_hv_f1_mean": [float(hv) for hv in history_hv_f1],
         "generations_run": gen,
     }
