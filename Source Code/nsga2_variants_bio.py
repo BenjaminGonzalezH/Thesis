@@ -5,7 +5,7 @@ biológica como estrategia aplicada sobre el frente no dominado F1 de
 Rv = Pv ∪ Qv, antes de la selección de sobrevivientes.
 
 - run_nsga2_PNS : agrega Pareto-Neighborhood Search.
-- run_nsga2_MBS : agrega Medoid-Based Search (regímenes bio / no_discrepancy / expresion).
+- run_nsga2_DBS : agrega Discrepancy-Based Search (regímenes bio / no_discrepancy / expresion).
 
 El resto del ciclo (selección por torneo, crossover, mutación, truncamiento
 por rank+crowding) es IDÉNTICO a run_nsga2 (nsga2.py). Todas comparten la
@@ -13,7 +13,7 @@ MISMA cuota global (solution_encoding.OBJ_FUNCTION_CALLS vs
 max_obj_function_calls) con los operadores, por lo que nunca se excede
 max_obj_function_calls.
 
-Este módulo también contiene los operadores PNS y MBS (con tope de
+Este módulo también contiene los operadores PNS y DBS (con tope de
 cuota opcional `max_obj_calls`), ya que las variantes dependen de ellos.
 """
 
@@ -110,13 +110,12 @@ def pareto_neighborhood_search(
     rng: np.random.Generator | None = None,
 ) -> list[dict]:
     """
-    Pareto-Neighborhood Search (PNS): para cada medoide z_k de C se explora
-    el vecindario Pareto de z_k (primeros `nF` frentes respecto a (D_EB, D_BB)
-    a z_k, excluyendo todos los medoides de C). Cada candidata c reemplaza a
-    z_k y se reconstruye la partición completa; se acepta si mejora AL MENOS
-    UNO de los dos índices Xie-Beni respecto a la solución original. El
-    conjunto aceptado (de los K medoides) se ordena por frentes de Pareto y
-    el operador retorna únicamente su frente F1.
+    Pareto-Neighborhood Search (PNS): se elige UN medoide z_k de C al azar
+    (análogo a PLS) y se explora su vecindario Pareto (primeros `nF` frentes
+    respecto a (D_EB, D_BB) a z_k, excluyendo todos los medoides de C). Cada
+    candidata c reemplaza a z_k y se reconstruye la partición completa; se
+    acepta si mejora AL MENOS UNO de los dos índices Xie-Beni respecto a la
+    solución original. Se retornan todas las candidatas aceptadas.
 
     Parámetros
     ----------
@@ -158,57 +157,49 @@ def pareto_neighborhood_search(
         xb_eb_0, xb_bb_0 = base_objectives
     if rng is None:
         rng = np.random.default_rng()
-    aceptadas: list[dict] = []
 
-    for k in range(1, K + 1):
-        zk = int(C[k - 1])
+    # ── Un único medoide z_k elegido al azar (como PLS) ──
+    k = int(rng.integers(1, K + 1))
+    zk = int(C[k - 1])
 
-        # ── Vecindario Pareto de z_k sobre TODO el dataset, excluyendo C ──
-        N_zk = _pareto_neighborhood(zk, ge_matrix, bi_matrix, excluir_mask, nF)
+    # ── Vecindario Pareto de z_k sobre TODO el dataset, excluyendo C ──
+    N_zk = _pareto_neighborhood(zk, ge_matrix, bi_matrix, excluir_mask, nF)
 
-        if verbose:
-            print(f"[PNS] k={k}  z_k={zk}  |N(z_k)|={len(N_zk)}")
+    if verbose:
+        print(f"[PNS] k={k}  z_k={zk}  |N(z_k)|={len(N_zk)}")
 
-        if not N_zk:
-            continue
-
-        # ── Evaluación batched y aceptación (mejora de al menos un objetivo) ──
-        candidatos = np.array(sorted(N_zk), dtype=C.dtype)
-
-        # ── Cuota global: recorte del batch y detención al agotarse ───────
-        if max_obj_calls is not None:
-            remaining = max_obj_calls - solution_encoding.OBJ_FUNCTION_CALLS
-            if remaining <= 0:
-                break
-            if len(candidatos) > remaining:
-                candidatos = rng.permutation(candidatos)[:remaining]
-        C_primes = np.tile(C, (len(candidatos), 1))
-        C_primes[:, k - 1] = candidatos
-
-        labels_primes = build_clusters_population(ge_matrix, C_primes)
-        xb_primes = xie_beni_population(ge_matrix, bi_matrix, C_primes, labels_primes)
-
-        accept_mask = (xb_primes[:, 0] < xb_eb_0) | (xb_primes[:, 1] < xb_bb_0)
-        for C_prime, labels_prime, (xb_eb_p, xb_bb_p), aceptado in zip(
-            C_primes, labels_primes, xb_primes, accept_mask
-        ):
-            if aceptado:
-                aceptadas.append({
-                    "solution": C_prime.copy(),
-                    "labels": labels_prime,
-                    "xb_eb": float(xb_eb_p),
-                    "xb_bb": float(xb_bb_p),
-                })
-
-    # ── Ordenamiento por frentes de Pareto del conjunto aceptado: se retorna su F1 ──
-    if not aceptadas:
+    if not N_zk:
         return []
-    objetivos = np.array([[d["xb_eb"], d["xb_bb"]] for d in aceptadas])
-    f1 = non_dominated_sort(objetivos)[0]
-    return [aceptadas[i] for i in f1]
+
+    # ── Evaluación batched y aceptación (mejora de al menos un objetivo) ──
+    candidatos = np.array(sorted(N_zk), dtype=C.dtype)
+
+    # ── Cuota global: recorte del batch ───────
+    if max_obj_calls is not None:
+        remaining = max_obj_calls - solution_encoding.OBJ_FUNCTION_CALLS
+        if remaining <= 0:
+            return []
+        if len(candidatos) > remaining:
+            candidatos = rng.permutation(candidatos)[:remaining]
+    C_primes = np.tile(C, (len(candidatos), 1))
+    C_primes[:, k - 1] = candidatos
+
+    labels_primes = build_clusters_population(ge_matrix, C_primes)
+    xb_primes = xie_beni_population(ge_matrix, bi_matrix, C_primes, labels_primes)
+
+    accept_mask = (xb_primes[:, 0] < xb_eb_0) | (xb_primes[:, 1] < xb_bb_0)
+    return [
+        {
+            "solution": C_primes[i].copy(),
+            "labels": labels_primes[i],
+            "xb_eb": float(xb_primes[i, 0]),
+            "xb_bb": float(xb_primes[i, 1]),
+        }
+        for i in np.flatnonzero(accept_mask)
+    ]
 
 #######################################################
-# MODULO MEDOID-BASED SEARCH (MBS)
+# MODULO MEDOID-BASED SEARCH (DBS)
 # Se construye una matriz de discrepancia logarítmica
 #     L = log((D_BB + ε) / (D_EB + ε))
 # y, según el régimen `mode`, se transforma en una matriz D_mode sobre la
@@ -216,18 +207,18 @@ def pareto_neighborhood_search(
 # en "celdas" (medoide más cercano bajo D_mode). El vecindario de cada
 # medoide z_k es el percentil `p` más cercano a z_k DENTRO de su celda
 # (sin medoides de la solución). La aceptación es estricta (mejora
-# de ambos Xie-Beni, partición reconstruida globalmente con D_EB); el
-# conjunto aceptado se ordena por frentes de Pareto y se retorna solo su F1.
+# de ambos Xie-Beni, partición reconstruida globalmente con D_EB); se
+# retornan todas las candidatas aceptadas.
 #######################################################
 
-MBS_MODES = ("bio", "no_discrepancy", "expresion")
-MBS_EPS = 1e-3          # ε por defecto de la matriz de discrepancia.
+DBS_MODES = ("bio", "no_discrepancy", "expresion")
+DBS_EPS = 1e-3          # ε por defecto de la matriz de discrepancia.
 
 def build_discrepancy_matrix(
     ge_matrix: np.ndarray,
     bi_matrix: np.ndarray,
     mode: str,
-    eps: float = MBS_EPS,
+    eps: float = DBS_EPS,
 ) -> np.ndarray:
     """
     Construye D_mode a partir de L = log((D_BB + ε) / (D_EB + ε)):
@@ -242,7 +233,7 @@ def build_discrepancy_matrix(
 
     D_mode puede tomar valores negativos (es solo un criterio de orden).
     """
-    assert mode in MBS_MODES, f"mode debe ser uno de {MBS_MODES}."
+    assert mode in DBS_MODES, f"mode debe ser uno de {DBS_MODES}."
     L = np.log((bi_matrix + eps) / (ge_matrix + eps))
     if mode == "bio":
         return L
@@ -250,13 +241,13 @@ def build_discrepancy_matrix(
         return -L
     return np.abs(L)
 
-def medoid_based_search(
+def discrepancy_based_search(
     C: np.ndarray,
     labels: np.ndarray,
     ge_matrix: np.ndarray,
     bi_matrix: np.ndarray,
     mode: str = "bio",
-    eps: float = MBS_EPS,
+    eps: float = DBS_EPS,
     p: float = 0.10,
     d_mode: np.ndarray | None = None,
     verbose: bool = False,
@@ -265,14 +256,13 @@ def medoid_based_search(
     rng: np.random.Generator | None = None,
 ) -> list[dict]:
     """
-    Medoid-Based Search (MBS): cada gen se asigna al medoide más cercano
+    Discrepancy-Based Search (DBS): cada gen se asigna al medoide más cercano
     bajo D_mode (celdas). Para cada medoide z_k de C, Celda_k = genes de su
     celda sin los medoides de C, y su vecindario N(z_k) es el percentil `p`
     de Celda_k más cercano a z_k según D_mode. Cada candidato c ∈ N(z_k)
     reemplaza a z_k y se acepta solo si mejora estrictamente AMBOS índices
-    Xie-Beni (partición reconstruida globalmente con D_EB). El conjunto
-    aceptado (de los K medoides) se ordena por frentes de Pareto y el
-    operador retorna únicamente su frente F1.
+    Xie-Beni (partición reconstruida globalmente con D_EB). El operador
+    retorna todas las candidatas aceptadas (de los K medoides).
 
     Parámetros
     ----------
@@ -298,7 +288,7 @@ def medoid_based_search(
     Retorna
     -------
     list[dict] con llaves "solution", "labels", "xb_eb", "xb_bb" — una
-    entrada por cada candidata del F1 del conjunto ACEPTADO (puede quedar vacía).
+    entrada por cada candidata aceptada (puede quedar vacía).
 
     Nota de rendimiento
     --------------------
@@ -332,7 +322,7 @@ def medoid_based_search(
 
         if len(celda_k) == 0:
             if verbose:
-                print(f"[MBS-{mode}] k={k}  z_k={zk}  celda vacía")
+                print(f"[DBS-{mode}] k={k}  z_k={zk}  celda vacía")
             continue
 
         # ── Vecindario: percentil p más cercano a z_k DENTRO de la celda ──
@@ -341,7 +331,7 @@ def medoid_based_search(
         candidatos = celda_k[dists <= umbral].astype(C.dtype)
 
         if verbose:
-            print(f"[MBS-{mode}] k={k}  z_k={zk}  |Celda_k|={len(celda_k)}  |N(z_k)|={len(candidatos)}")
+            print(f"[DBS-{mode}] k={k}  z_k={zk}  |Celda_k|={len(celda_k)}  |N(z_k)|={len(candidatos)}")
 
         # ── Evaluación batched y aceptación estricta ─────────────────────
 
@@ -370,15 +360,11 @@ def medoid_based_search(
                     "xb_bb": float(xb_bb_p),
                 })
 
-    # ── Ordenamiento por frentes de Pareto del conjunto aceptado: se retorna su F1 ──
-    if not aceptadas:
-        return []
-    objetivos = np.array([[d["xb_eb"], d["xb_bb"]] for d in aceptadas])
-    f1 = non_dominated_sort(objetivos)[0]
-    return [aceptadas[i] for i in f1]
+    # ── Se retornan todas las candidatas que mejoran ambos objetivos ──
+    return aceptadas
 
 #######################################################
-# Núcleo común de run_nsga2_PNS / run_nsga2_MBS: ciclo de
+# Núcleo común de run_nsga2_PNS / run_nsga2_DBS: ciclo de
 # run_nsga2 + un operador BI aplicado sobre el F1 de Rv = Pv ∪ Qv
 #######################################################
 
@@ -562,7 +548,7 @@ def run_nsga2_PNS(
 ) -> dict:
     """
     Variante de run_nsga2 que agrega PNS: tras construir Rv = Pv ∪ Qv, se
-    aplica PNS (`nF` frentes de Pareto por medoide) sobre cada solución de su F1; el F1 de los reemplazos aceptados de cada solución (mejoran al menos un Xie-Beni) se agrega
+    aplica PNS (`nF` frentes de Pareto de UN medoide al azar) sobre cada solución de su F1; los reemplazos aceptados (mejoran al menos un Xie-Beni) se agregan
     a Rv antes de la selección de sobrevivientes. Ver _run_nsga2_BI.
     """
     def apply_operator(C, labels, objs, limit, rng, _population):
@@ -577,11 +563,11 @@ def run_nsga2_PNS(
     )
 
 #######################################################
-# run_nsga2_MBS: variante de run_nsga2 que agrega Medoid-Based Search
-# (MBS, régimen `mode`) como estrategia de búsqueda local
+# run_nsga2_DBS: variante de run_nsga2 que agrega Discrepancy-Based Search
+# (DBS, régimen `mode`) como estrategia de búsqueda local
 #######################################################
 
-def run_nsga2_MBS(
+def run_nsga2_DBS(
     ge_matrix: np.ndarray,
     bi_matrix: np.ndarray,
     n: int,
@@ -589,16 +575,16 @@ def run_nsga2_MBS(
     pop_size: int,
     max_obj_function_calls: int,
     mode: str = "bio",
-    eps: float = MBS_EPS,
+    eps: float = DBS_EPS,
     p: float = 0.10,
     crossover_prob: float = 0.80,
     mutation_prob: float = 0.01,
-    mbs_local_budget: int | None = None,
+    dbs_local_budget: int | None = None,
     seed: int | None = None,
 ) -> dict:
     """
-    Variante de run_nsga2 que agrega MBS: tras construir Rv = Pv ∪ Qv, se
-    aplica MBS sobre cada solución de su F1; el F1 de los reemplazos aceptados (mejoran estrictamente ambos Xie-Beni) se agrega a Rv antes de la
+    Variante de run_nsga2 que agrega DBS: tras construir Rv = Pv ∪ Qv, se
+    aplica DBS sobre cada solución de su F1; los reemplazos aceptados (mejoran estrictamente ambos Xie-Beni) se agregan a Rv antes de la
     selección de sobrevivientes. Ver _run_nsga2_BI.
 
     mode : "bio" | "no_discrepancy" | "expresion" — fijo por corrida. D_mode
@@ -606,16 +592,16 @@ def run_nsga2_MBS(
     eps  : ε de la matriz de discrepancia.
     p    : percentil de vecindad dentro de la celda de cada medoide.
     """
-    assert mode in MBS_MODES, f"mode debe ser uno de {MBS_MODES}."
+    assert mode in DBS_MODES, f"mode debe ser uno de {DBS_MODES}."
     d_mode = build_discrepancy_matrix(ge_matrix, bi_matrix, mode, eps)
 
     def apply_operator(C, labels, objs, limit, rng, _population):
-        return medoid_based_search(
+        return discrepancy_based_search(
             C, labels, ge_matrix, bi_matrix, mode=mode, eps=eps, p=p, d_mode=d_mode,
             max_obj_calls=limit, base_objectives=tuple(objs), rng=rng,
         )
 
     return _run_nsga2_BI(
         apply_operator, ge_matrix, bi_matrix, n, k, pop_size, max_obj_function_calls,
-        crossover_prob, mutation_prob, mbs_local_budget, seed,
+        crossover_prob, mutation_prob, dbs_local_budget, seed,
     )
