@@ -21,7 +21,7 @@ def _dominates(obj_a, obj_b) -> bool:
 
     Parámetros
     ----------
-    obj_a, obj_b : secuencias de floats (ej. (XBEB, XBBB)).
+    obj_a, obj_b : secuencias de floats (ej. (XB_GE, XB_BI)).
     """
     not_worse = all(a <= b for a, b in zip(obj_a, obj_b))
     strictly_better = any(a < b for a, b in zip(obj_a, obj_b))
@@ -35,7 +35,7 @@ def dominance_matrix(objectives: np.ndarray) -> np.ndarray:
 
 def non_dominated_sort(objectives) -> list[list[int]]:
     """
-    Ordena una población en frentes de Pareto (F1, F2, ...) según dominancia,
+    Ordena una población en frentes de Pareto (F0, F1, ...) según dominancia,
     replicando el procedimiento de NSGA-II. La comparación de dominancia se
     vectoriza con dominance_matrix (O(n²) en NumPy) en vez de un doble loop
     de Python con _dominates.
@@ -43,7 +43,7 @@ def non_dominated_sort(objectives) -> list[list[int]]:
     Parámetros
     ----------
     objectives : np.ndarray de shape (pop_size, 2), o lista de tuplas
-                 (XBEB, XBBB) — un par de objetivos por individuo.
+                 (XB_GE, XB_BI) — un par de objetivos por individuo.
     """
     objectives = np.asarray(objectives)
     n = len(objectives)

@@ -2,7 +2,7 @@
 Variantes de run_nsga2 desarrolladas en Notes_2-LSOperators.ipynb, que
 agregan cada uno de los operadores de búsqueda local de LS.py como
 estrategia de intensificación/diversificación aplicada sobre el frente no
-dominado F1 de Rv = Pv ∪ Qv, antes de la selección de sobrevivientes.
+dominado F0 de Rv = Pv ∪ Qv, antes de la selección de sobrevivientes.
 
 - run_nsga2_MOPR  : agrega Multi-Objective Path-Relinking (intensificación).
 - run_nsga2_PLS   : agrega Pareto Local Search (diversificación).
@@ -49,8 +49,8 @@ def run_nsga2_MOPR(
     """
     Variante de run_nsga2 que agrega MOPR como estrategia de intensificación
     (líneas 11-12 del Algoritmo 1, Parraga-Alava et al. 2018): tras construir
-    Rv = Pv ∪ Qv, se extrae su frente no dominado F1, se aplica MOPR sobre
-    pares consecutivos de F1, y las soluciones NUEVAS que aporta (evaluadas
+    Rv = Pv ∪ Qv, se extrae su frente no dominado F0, se aplica MOPR sobre
+    pares consecutivos de F0, y las soluciones NUEVAS que aporta (evaluadas
     respetando la misma cuota global) se agregan de vuelta a Rv antes de la
     selección de sobrevivientes. El resto del ciclo (selección por torneo,
     crossover, mutación, truncamiento por rank+crowding) es IDÉNTICO a
@@ -72,12 +72,12 @@ def run_nsga2_MOPR(
 
     # Copnstrucción de fronteras iniciales.
     initial_fronts = non_dominated_sort(objectives) if len(objectives) else [[]]
-    initial_f1 = initial_fronts[0]
+    initial_f0 = initial_fronts[0]
 
     # Guardado de historial.
     history_objectives = [objectives.copy()]
     history_labels = [labels_pop.copy()]
-    history_hv_f1 = [hypervolume_f1(objectives[initial_f1])] if len(objectives) else []
+    history_hv_f1 = [hypervolume_f1(objectives[initial_f0])] if len(objectives) else []
 
     ###########################
     # ITERACIÓN PRINCIPAL
@@ -119,29 +119,29 @@ def run_nsga2_MOPR(
         # Intensificación sobre el frente no dominado de Rv = Pv ∪ Qv.
         if solution_encoding.OBJ_FUNCTION_CALLS < max_obj_function_calls:
             rv_fronts = non_dominated_sort(combined_objectives)
-            f1_idx = rv_fronts[0]
-            f1_crowding = crowding_distance(combined_objectives, f1_idx)
-            f1_idx = sorted(f1_idx, key=lambda i: f1_crowding[i], reverse=True)
-            f1_pop = combined_population[f1_idx]
+            f0_idx = rv_fronts[0]
+            f0_crowding = crowding_distance(combined_objectives, f0_idx)
+            f0_idx = sorted(f0_idx, key=lambda i: f0_crowding[i], reverse=True)
+            f0_pop = combined_population[f0_idx]
 
-            if len(f1_pop) >= 2:
-                f1_obj = combined_objectives[f1_idx]
+            if len(f0_pop) >= 2:
+                f0_obj = combined_objectives[f0_idx]
                 pooled_sols, pooled_objs = [], []
-                for i in range(len(f1_pop) - 1):
+                for i in range(len(f0_pop) - 1):
                     if solution_encoding.OBJ_FUNCTION_CALLS >= max_obj_function_calls:
                         break
-                    C1, C2 = f1_pop[i], f1_pop[i + 1]
+                    C1, C2 = f0_pop[i], f0_pop[i + 1]
                     if frozenset(C1.tolist()) == frozenset(C2.tolist()):
                         continue
-                    # C1 y C2 ya están evaluados (F1 de Rv): se pasan sus objetivos
+                    # C1 y C2 ya están evaluados (F0 de Rv): se pasan sus objetivos
                     # para no volver a evaluarlos.
                     mopr_result = multi_objective_path_relinking(
                         C1, C2, ge_matrix, bi_matrix, max_obj_function_calls,
-                        C1_objective=f1_obj[i], C2_objective=f1_obj[i + 1], verbose=False,
+                        C1_objective=f0_obj[i], C2_objective=f0_obj[i + 1], verbose=False,
                     )
-                    if len(mopr_result["f1"]) > 0:
-                        pooled_sols.append(mopr_result["f1"])
-                        pooled_objs.append(mopr_result["f1_obj"])
+                    if len(mopr_result["f0"]) > 0:
+                        pooled_sols.append(mopr_result["f0"])
+                        pooled_objs.append(mopr_result["f0_obj"])
 
                 # Solo se agregan las soluciones REALMENTE nuevas que MOPR aportó.
                 # Sus objetivos ya fueron calculados dentro de path_relinking
@@ -183,17 +183,17 @@ def run_nsga2_MOPR(
         labels_pop = combined_labels[next_indices]
 
         current_fronts = non_dominated_sort(objectives)
-        f1_indices = current_fronts[0]
-        f1_hv = hypervolume_f1(objectives[f1_indices])
+        f0_indices = current_fronts[0]
+        f0_hv = hypervolume_f1(objectives[f0_indices])
 
         history_objectives.append(objectives.copy())
         history_labels.append(labels_pop.copy())
-        history_hv_f1.append(f1_hv)
+        history_hv_f1.append(f0_hv)
 
         print(
             f"[gen {gen:>3}] llamadas = {solution_encoding.OBJ_FUNCTION_CALLS:>6}/{max_obj_function_calls}  |  "
-            f"población = {len(population)}  |  F1 = {len(f1_indices)}  |  "
-            f"HV F1 = {f1_hv:.6f}"
+            f"población = {len(population)}  |  F0 = {len(f0_indices)}  |  "
+            f"HV F0 = {f0_hv:.6f}"
         )
 
     print(f"\nCriterio de paro EXACTO: {solution_encoding.OBJ_FUNCTION_CALLS}/{max_obj_function_calls} llamadas a la función objetivo, {gen} generaciones completadas.")
@@ -232,7 +232,7 @@ def run_nsga2_PLS(
     """
     Variante de run_nsga2 que agrega PLS como estrategia de diversificación
     (líneas 13-14 del Algoritmo 1, Parraga-Alava et al. 2018): tras construir
-    Rv = Pv ∪ Qv, se extrae su frente no dominado F1 y se aplica PLS sobre
+    Rv = Pv ∪ Qv, se extrae su frente no dominado F0 y se aplica PLS sobre
     él; las soluciones NUEVAS que aporta se agregan de vuelta a Rv antes de
     la selección de sobrevivientes. El resto del ciclo es IDÉNTICO a
     run_nsga2 — MOPR no se agrega en esta variante.
@@ -243,12 +243,9 @@ def run_nsga2_PLS(
         consumir POR GENERACIÓN (ver pareto_local_search en LS.py). SIN
         este límite, PLS puede agotar TODO max_obj_function_calls en la
         primera generación, dejando 0 evaluaciones para el resto del
-        NSGA-II (comprobado: con pop_size=20, max_obj_function_calls=3000,
-        sin límite el run termina en 1 generación; con
-        pls_local_budget=150 —5% del total— corre 18 generaciones
-        completas). Se recomienda fijarlo como una fracción de
+        NSGA-II. Se recomienda fijarlo como una fracción de
         max_obj_function_calls, análogo al parámetro `ls_budget` de
-        Toledo (2021), Sección 3.3.6.
+        Toledo (2021), Sección 3.3.6. None = solo rige la cuota global.
 
     pls_neighborhood : float en (0, 1] — fracción de n que define el tamaño
         máximo del vecindario de PLS (ceil(pls_neighborhood * n) vecinos por
@@ -267,11 +264,11 @@ def run_nsga2_PLS(
     )
 
     initial_fronts = non_dominated_sort(objectives) if len(objectives) else [[]]
-    initial_f1 = initial_fronts[0]
+    initial_f0 = initial_fronts[0]
 
     history_objectives = [objectives.copy()]
     history_labels = [labels_pop.copy()]
-    history_hv_f1 = [hypervolume_f1(objectives[initial_f1])] if len(objectives) else []
+    history_hv_f1 = [hypervolume_f1(objectives[initial_f0])] if len(objectives) else []
 
     gen = 0
     while solution_encoding.OBJ_FUNCTION_CALLS < max_obj_function_calls and len(population) >= 2:
@@ -309,13 +306,13 @@ def run_nsga2_PLS(
         # Diversificación sobre el frente no dominado de Rv = Pv ∪ Qv.
         if solution_encoding.OBJ_FUNCTION_CALLS < max_obj_function_calls:
             rv_fronts = non_dominated_sort(combined_objectives)
-            f1_idx = rv_fronts[0]
-            f1_pop = combined_population[f1_idx]
+            f0_idx = rv_fronts[0]
+            f0_pop = combined_population[f0_idx]
 
-            if len(f1_pop) >= 1:
+            if len(f0_pop) >= 1:
                 pls_pop, pls_obj_list = pareto_local_search(
-                    initial_population=f1_pop,
-                    initial_objectives=combined_objectives[f1_idx],
+                    initial_population=f0_pop,
+                    initial_objectives=combined_objectives[f0_idx],
                     ge_matrix=ge_matrix, bi_matrix=bi_matrix,
                     max_obj_calls=max_obj_function_calls,
                     local_budget=pls_local_budget,
@@ -362,17 +359,17 @@ def run_nsga2_PLS(
         labels_pop = combined_labels[next_indices]
 
         current_fronts = non_dominated_sort(objectives)
-        f1_indices = current_fronts[0]
-        f1_hv = hypervolume_f1(objectives[f1_indices])
+        f0_indices = current_fronts[0]
+        f0_hv = hypervolume_f1(objectives[f0_indices])
 
         history_objectives.append(objectives.copy())
         history_labels.append(labels_pop.copy())
-        history_hv_f1.append(f1_hv)
+        history_hv_f1.append(f0_hv)
 
         print(
             f"[gen {gen:>3}] llamadas = {solution_encoding.OBJ_FUNCTION_CALLS:>6}/{max_obj_function_calls}  |  "
-            f"población = {len(population)}  |  F1 = {len(f1_indices)}  |  "
-            f"HV F1 = {f1_hv:.6f}"
+            f"población = {len(population)}  |  F0 = {len(f0_indices)}  |  "
+            f"HV F0 = {f0_hv:.6f}"
         )
 
     print(f"\nCriterio de paro EXACTO: {solution_encoding.OBJ_FUNCTION_CALLS}/{max_obj_function_calls} llamadas a la función objetivo, {gen} generaciones completadas.")
@@ -413,7 +410,7 @@ def run_nsga2_MOLS(
     """
     Variante de run_nsga2 que agrega MOLS (Haidine & Lehnert,
     2008; Toledo 2021) como estrategia de búsqueda local: tras construir
-    Rv = Pv ∪ Qv, se extrae su frente no dominado F1 y se aplica el
+    Rv = Pv ∪ Qv, se extrae su frente no dominado F0 y se aplica el
     operador elegido (`mode`); las soluciones NUEVAS se agregan de vuelta
     a Rv antes de la selección de sobrevivientes. Resto del ciclo idéntico
     a run_nsga2 — MOPR/PLS no se agregan en esta variante.
@@ -444,11 +441,11 @@ def run_nsga2_MOLS(
     )
 
     initial_fronts = non_dominated_sort(objectives) if len(objectives) else [[]]
-    initial_f1 = initial_fronts[0]
+    initial_f0 = initial_fronts[0]
 
     history_objectives = [objectives.copy()]
     history_labels = [labels_pop.copy()]
-    history_hv_f1 = [hypervolume_f1(objectives[initial_f1])] if len(objectives) else []
+    history_hv_f1 = [hypervolume_f1(objectives[initial_f0])] if len(objectives) else []
 
     gen = 0
     while solution_encoding.OBJ_FUNCTION_CALLS < max_obj_function_calls and len(population) >= 2:
@@ -485,14 +482,14 @@ def run_nsga2_MOLS(
         # ── MOLS: ÚNICO agregado respecto a run_nsga2 ───────────────────────
         if solution_encoding.OBJ_FUNCTION_CALLS < max_obj_function_calls:
             rv_fronts = non_dominated_sort(combined_objectives)
-            f1_idx = rv_fronts[0]
-            f1_pop = combined_population[f1_idx]
+            f0_idx = rv_fronts[0]
+            f0_pop = combined_population[f0_idx]
 
-            if len(f1_pop) >= 1:
+            if len(f0_pop) >= 1:
                 mols_pop, mols_obj = mols(
-                    f1_pop, ge_matrix, bi_matrix, m_v_matrix, neighborhood,
+                    f0_pop, ge_matrix, bi_matrix, m_v_matrix, neighborhood,
                     max_obj_calls=max_obj_function_calls, mode=mode,
-                    population_objectives=combined_objectives[f1_idx],
+                    population_objectives=combined_objectives[f0_idx],
                     local_budget=mols_local_budget,
                     verbose=False,
                 )
@@ -528,17 +525,17 @@ def run_nsga2_MOLS(
         labels_pop = combined_labels[next_indices]
 
         current_fronts = non_dominated_sort(objectives)
-        f1_indices = current_fronts[0]
-        f1_hv = hypervolume_f1(objectives[f1_indices])
+        f0_indices = current_fronts[0]
+        f0_hv = hypervolume_f1(objectives[f0_indices])
 
         history_objectives.append(objectives.copy())
         history_labels.append(labels_pop.copy())
-        history_hv_f1.append(f1_hv)
+        history_hv_f1.append(f0_hv)
 
         print(
             f"[gen {gen:>3}] llamadas = {solution_encoding.OBJ_FUNCTION_CALLS:>6}/{max_obj_function_calls}  |  "
-            f"población = {len(population)}  |  F1 = {len(f1_indices)}  |  "
-            f"HV F1 = {f1_hv:.6f}"
+            f"población = {len(population)}  |  F0 = {len(f0_indices)}  |  "
+            f"HV F0 = {f0_hv:.6f}"
         )
 
     print(f"\nCriterio de paro EXACTO: {solution_encoding.OBJ_FUNCTION_CALLS}/{max_obj_function_calls} llamadas a la función objetivo, {gen} generaciones completadas.")

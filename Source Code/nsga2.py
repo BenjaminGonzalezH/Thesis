@@ -139,11 +139,11 @@ def run_nsga2(
     )
 
     initial_fronts = non_dominated_sort(objectives) if len(objectives) else [[]]
-    initial_f1 = initial_fronts[0]
+    initial_f0 = initial_fronts[0]
 
     history_objectives = [objectives.copy()]
     history_labels     = [labels_pop.copy()]
-    history_hv_f1      = [hypervolume_f1(objectives[initial_f1])] if len(objectives) else []
+    history_hv_f1      = [hypervolume_f1(objectives[initial_f0])] if len(objectives) else []
 
     gen = 0
     while solution_encoding.OBJ_FUNCTION_CALLS < max_obj_function_calls and len(population) >= 2:
@@ -202,14 +202,14 @@ def run_nsga2(
         labels_pop = combined_labels[next_indices]
 
         current_fronts = non_dominated_sort(objectives)
-        f1_indices = current_fronts[0]
-        f1_hv = hypervolume_f1(objectives[f1_indices])
+        f0_indices = current_fronts[0]
+        f0_hv = hypervolume_f1(objectives[f0_indices])
 
         history_objectives.append(objectives.copy())
         history_labels.append(labels_pop.copy())
-        history_hv_f1.append(f1_hv)
+        history_hv_f1.append(f0_hv)
 
-        print(f"[gen {gen:>3}] llamadas = {solution_encoding.OBJ_FUNCTION_CALLS:>6}/{max_obj_function_calls}  |  población = {len(population)}  |  F1 = {len(f1_indices)}  |  HV F1 = {f1_hv:.6f}")
+        print(f"[gen {gen:>3}] llamadas = {solution_encoding.OBJ_FUNCTION_CALLS:>6}/{max_obj_function_calls}  |  población = {len(population)}  |  F0 = {len(f0_indices)}  |  HV F0 = {f0_hv:.6f}")
 
     print(f"\nCriterio de paro EXACTO: {solution_encoding.OBJ_FUNCTION_CALLS}/{max_obj_function_calls} llamadas a la función objetivo, {gen} generaciones completadas.")
 

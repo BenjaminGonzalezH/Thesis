@@ -129,7 +129,7 @@ def xie_beni(
 
     Retorna
     -------
-    tuple[float, float] — (XBEB, XBBB). Valores menores indican mejor solución.
+    tuple[float, float] — (XB_GE, XB_BI). Valores menores indican mejor solución.
     Cada componente retorna np.inf si dos medoides son idénticos en esa matriz.
     """
     xp = cp if _GPU else np

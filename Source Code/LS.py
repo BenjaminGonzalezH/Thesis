@@ -58,7 +58,7 @@ def evaluate_objectives_population(
     bi_matrix: np.ndarray,
 ) -> np.ndarray:
     """
-    Versión "batch" de evaluate_objectives: evalúa (XBEB, XBBB) para TODA
+    Versión "batch" de evaluate_objectives: evalúa (XB_GE, XB_BI) para TODA
     una población de medoides de una sola vez, apilando build_clusters_population
     + xie_beni_population en vez de iterar evaluate_objectives candidata por
     candidata. Retorna un array (m, 2).
@@ -86,19 +86,19 @@ def evaluate_objectives_population(
 def _select_best(objectives: list[tuple[float, float]]) -> int:
     """
     Selecciona el mejor índice de un conjunto de candidatas: primero por
-    frente de Pareto (F1) y, en caso de empate, por la mayor crowding
+    frente de Pareto (F0) y, en caso de empate, por la mayor crowding
     distance — el "best move" de cada paso de la trayectoria.
     """
-    # Nota: Considerar que PR solo es utilizado en la F1 al tomar
+    # Nota: Considerar que PR solo es utilizado en la F0 al tomar
     # las mejores soluciones resultantes de la trayectoria.
     fronts = non_dominated_sort(objectives)
-    f1 = fronts[0]
+    f0 = fronts[0]
 
-    if len(f1) == 1:
-        return f1[0]
+    if len(f0) == 1:
+        return f0[0]
 
-    dist = crowding_distance(objectives, f1)
-    return max(f1, key=lambda i: dist[i])
+    dist = crowding_distance(objectives, f0)
+    return max(f0, key=lambda i: dist[i])
 
 def path_relinking(
     start: np.ndarray,
@@ -118,7 +118,7 @@ def path_relinking(
     trayectoria vuelve INCOMPLETA (no necesariamente llega a `guide`).
 
     Retorna (trajectory, trajectory_obj): cada solución de la trayectoria
-    junto con su objetivo (XBEB, XBBB), ya calculado al elegir el mejor
+    junto con su objetivo (XB_GE, XB_BI), ya calculado al elegir el mejor
     movimiento de cada paso — así no se vuelve a evaluar (ni a gastar
     cuota) después. `start_objective` es el objetivo ya conocido de
     `start`; si es None, se evalúa (1 llamada).
@@ -185,10 +185,10 @@ def path_relinking(
         trajectory_obj.append(np.asarray(objectives[best_idx], dtype=np.float64))
 
         if verbose:
-            xbeb, xbbb = objectives[best_idx]
+            xb_ge, xb_bi = objectives[best_idx]
             print(
                 f"[PR] swap z_{zk_chosen} → z_{zl_chosen}  → {current.tolist()}  "
-                f"(XBEB={xbeb:.6f}, XBBB={xbbb:.6f})  [llamadas={solution_encoding.OBJ_FUNCTION_CALLS}/{max_obj_calls}]"
+                f"(XB_GE={xb_ge:.6f}, XB_BI={xb_bi:.6f})  [llamadas={solution_encoding.OBJ_FUNCTION_CALLS}/{max_obj_calls}]"
             )
 
     return trajectory, trajectory_obj
@@ -210,7 +210,7 @@ def multi_objective_path_relinking(
     El pool se arma con los objetivos que ya calculó path_relinking, por lo
     que NO se evalúa nada adicional (cada solución se paga una sola vez).
     `C1_objective` / `C2_objective` son los objetivos ya conocidos de C1 y
-    C2 (p.ej. los del F1 de Rv); si son None, se evalúan.
+    C2 (p.ej. los del F0 de Rv); si son None, se evalúan.
     """
     k = len(C1)
 
@@ -218,7 +218,7 @@ def multi_objective_path_relinking(
         if verbose:
             print("[MOPR] Cuota global ya agotada antes de iniciar.")
         empty = np.empty((0, k), dtype=C1.dtype)
-        return {"pool": empty, "pool_obj": np.empty((0, 2)), "f1": empty, "f1_obj": np.empty((0, 2)),
+        return {"pool": empty, "pool_obj": np.empty((0, 2)), "f0": empty, "f0_obj": np.empty((0, 2)),
                 "trajectory_C1_to_C2": [], "trajectory_C2_to_C1": []}
 
     if C1_objective is None or C2_objective is None:
@@ -252,18 +252,18 @@ def multi_objective_path_relinking(
     pool_obj = np.stack([o for _, o in unique_pool.values()])
 
     fronts = non_dominated_sort(pool_obj)
-    f1_indices = fronts[0]
-    f1 = pool[f1_indices]
-    f1_obj = pool_obj[f1_indices]
+    f0_indices = fronts[0]
+    f0 = pool[f0_indices]
+    f0_obj = pool_obj[f0_indices]
 
     if verbose:
         print(f"\n[MOPR] Pool: {pool.shape[0]} soluciones "
               f"(llamadas: {solution_encoding.OBJ_FUNCTION_CALLS}/{max_obj_calls}).")
-        print(f"[MOPR] Frente no dominado (F1): {len(f1)} soluciones.")
+        print(f"[MOPR] Frente no dominado (F0): {len(f0)} soluciones.")
 
     return {
         "pool": pool, "pool_obj": pool_obj,
-        "f1": f1, "f1_obj": f1_obj,
+        "f0": f0, "f0_obj": f0_obj,
         "trajectory_C1_to_C2": traj_c1_c2, "trajectory_C2_to_C1": traj_c2_c1,
     }
 
@@ -338,7 +338,7 @@ def pareto_local_search(
 
     Parámetros
     ----------
-    initial_objectives : np.ndarray | None — objetivos (XBEB, XBBB) YA
+    initial_objectives : np.ndarray | None — objetivos (XB_GE, XB_BI) YA
         CONOCIDOS para `initial_population`, en el mismo orden y shape
         (m, 2). Si se proveen, NO se vuelve a llamar evaluate_objectives
         sobre esas soluciones. Si es None, se evalúan todas desde cero,
@@ -346,6 +346,11 @@ def pareto_local_search(
         solo vecino.
     neighborhood : float en (0, 1] — fracción de n que define el tamaño
         máximo de N(C): ceil(neighborhood * n) vecinos por exploración.
+    local_budget : int | None — cuota propia de ESTA llamada: máximo de
+        llamadas a la función objetivo que PLS puede consumir en esta
+        invocación (se suma a las ya realizadas). Evita que PLS agote todo
+        `max_obj_calls` dentro de una sola generación del NSGA-II. Si es
+        None, solo rige la cuota GLOBAL.
     """
     # Inicialización de elementos de números pseudoaleatorios.
     rng = np.random.default_rng(seed)
@@ -434,7 +439,7 @@ def pareto_local_search(
             neighbors = neighbors[:remaining]
 
         if verbose:
-            print(f"[PLS] C={C.tolist()}  (XBEB={C_obj[0]:.4f}, XBBB={C_obj[1]:.4f})  "
+            print(f"[PLS] C={C.tolist()}  (XB_GE={C_obj[0]:.4f}, XB_BI={C_obj[1]:.4f})  "
                   f"reemplazando posición {pos} (z_{zk}), |N(C)|={len(neighbors)}")
 
         # e. -- Sin vecinos factibles: C queda explorada.
@@ -443,19 +448,19 @@ def pareto_local_search(
             continue
 
         # f. -- Criterio de aceptación: ordenamiento no dominado CONJUNTO sobre
-        # vecinos + archivo; el nuevo archivo es el frente F1 de esa unión.
+        # vecinos + archivo; el nuevo archivo es el frente F0 de esa unión.
         neighbor_objs = evaluate_objectives_population(neighbors, ge_matrix, bi_matrix)
 
         keys = list(pool.keys())
         all_objs = [pool[key]["objectives"] for key in keys] + [tuple(o) for o in neighbor_objs]
-        f1 = set(non_dominated_sort(all_objs)[0])
+        f0 = set(non_dominated_sort(all_objs)[0])
 
         new_pool: dict[frozenset, dict] = {}
         for i, key in enumerate(keys):
-            if i in f1:
+            if i in f0:
                 new_pool[key] = pool[key]                      # hereda 'explored'
         for j, (neighbor, neighbor_obj) in enumerate(zip(neighbors, neighbor_objs)):
-            if len(keys) + j in f1:
+            if len(keys) + j in f0:
                 new_pool[frozenset(neighbor.tolist())] = {
                     "solution": neighbor,
                     "objectives": tuple(neighbor_obj),
@@ -566,10 +571,10 @@ def mols(
         expresión o la de información biológica.
     max_obj_calls : int — cuota GLOBAL del run completo (contra
         solution_encoding.OBJ_FUNCTION_CALLS).
-    population_objectives : np.ndarray | None — objetivos (XBEB, XBBB) YA
+    population_objectives : np.ndarray | None — objetivos (XB_GE, XB_BI) YA
         CONOCIDOS para `population`, en el mismo orden (shape (m,2)). Evita
         re-evaluar (y re-gastar presupuesto) soluciones cuyo objetivo el
-        llamador ya calculó (p.ej. el F1 de Rv en run_nsga2_MOLS).
+        llamador ya calculó (p.ej. el F0 de Rv en run_nsga2_MOLS).
     local_budget : int | None — cuota propia de ESTA llamada (análogo a
         pareto_local_search); evita que una invocación dentro del ciclo de
         NSGA-II consuma TODO el presupuesto restante de una vez.

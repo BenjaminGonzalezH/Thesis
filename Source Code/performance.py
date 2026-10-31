@@ -1,6 +1,6 @@
 """
 Visualización y métricas de desempeño: frentes de Pareto, diversidad
-(Jaccard) e hipervolumen de F1 respecto a un punto de referencia.
+(Jaccard) e hipervolumen de F0 respecto a un punto de referencia.
 """
 
 ############################
@@ -152,16 +152,16 @@ def jaccard_population(generations_labels: list[np.ndarray]) -> list[np.ndarray]
 
     return jaccard_per_generation
 
-# Punto de referencia (editable) para el hipervolumen de F1. Debe ser peor
+# Punto de referencia (editable) para el hipervolumen de F0. Debe ser peor
 # (mayor) que las soluciones del frente en ambos objetivos (minimización).
-HV_REFERENCE_POINT = (1.0, 1.0)
+HV_REFERENCE_POINT = (10.0, 10.0)
 
 def hypervolume_f1(f1_objectives: np.ndarray, ref_point: tuple[float, float] = HV_REFERENCE_POINT) -> float:
     """
-    Hipervolumen (área) dominado por el frente F1 respecto a `ref_point`
+    Hipervolumen (área) dominado por el frente F0 respecto a `ref_point`
     (por defecto HV_REFERENCE_POINT = (5,5)). MAYOR es mejor.
 
-    f1_objectives : np.ndarray shape (m, 2) — (XB_GE, XB_BI) de las soluciones de F1.
+    f1_objectives : np.ndarray shape (m, 2) — (XB_GE, XB_BI) de las soluciones de F0.
     Soluciones que no dominan al punto de referencia (o con XB=inf) no aportan área.
     """
     pts = np.asarray(f1_objectives, dtype=np.float64).reshape(-1, 2)
@@ -186,19 +186,19 @@ def plot_hypervolume_convergence(
     filename: str = "hypervolume_convergence.png",
     show: bool = False,
 ) -> str | None:
-    """Convergencia del hipervolumen de F1 por generación (valor y mejor acumulado)."""
+    """Convergencia del hipervolumen de F0 por generación (valor y mejor acumulado)."""
     hv = np.asarray(hv_f1_per_generation, dtype=np.float64)
     generations = np.arange(1, len(hv) + 1)
     best_so_far = np.maximum.accumulate(hv)
 
     fig, ax = plt.subplots(figsize=(8, 5))
 
-    ax.plot(generations, hv, color="steelblue", marker="o", label="HV de F1 por generación")
+    ax.plot(generations, hv, color="steelblue", marker="o", label="HV de F0 por generación")
     ax.plot(generations, best_so_far, color="darkorange", linestyle="--", marker="s", label="Mejor acumulado (máximo)")
 
     ax.set_xlabel("Generación")
-    ax.set_ylabel(f"Hipervolumen de F1, ref = {HV_REFERENCE_POINT} (mayor es mejor)")
-    ax.set_title("Convergencia del hipervolumen de F1")
+    ax.set_ylabel(f"Hipervolumen de F0, ref = {HV_REFERENCE_POINT} (mayor es mejor)")
+    ax.set_title("Convergencia del hipervolumen de F0")
     ax.legend(loc="best", fontsize="small")
     ax.grid(alpha=0.3)
     fig.tight_layout()
