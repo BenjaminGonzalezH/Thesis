@@ -1,0 +1,59 @@
+{
+  "NSGA2": {
+    "hv_f1": 90.2586687619783,
+    "parametros": {
+      "pop_size": 174,
+      "crossover_prob": 0.9,
+      "mutation_prob": 0.04
+    }
+  },
+  "NSGA2_PLS": {
+    "hv_f1": 91.08182534469316,
+    "parametros": {
+      "pop_size": 217,
+      "crossover_prob": 0.89,
+      "mutation_prob": 0.01,
+      "pls_neighborhood": 0.07,
+      "pls_local_budget_pct": 9
+    }
+  },
+  "NSGA2_MOLS": {
+    "hv_f1": 90.09559507802945,
+    "parametros": {
+      "pop_size": 278,
+      "crossover_prob": 0.9,
+      "mutation_prob": 0.02,
+      "M_v": "BOTH",
+      "mode": "large",
+      "mols_local_budget_pct": 7,
+      "neighborhood_pct": 23
+    }
+  },
+  "NSGA2_DBS": {
+    "hv_f1": 90.38630186983139,
+    "parametros": {
+      "pop_size": 266,
+      "crossover_prob": 0.9,
+      "mutation_prob": 0.05,
+      "mode": "expresion",
+      "p_pct": 13
+    }
+  },
+  "NSGA2_PNS": {
+    "hv_f1": 91.03808622980534,
+    "parametros": {
+      "pop_size": 61,
+      "crossover_prob": 0.8700000000000001,
+      "mutation_prob": 0.03,
+      "nF": 3
+    }
+  },
+  "NSGA2_MOPR": {
+    "hv_f1": 90.62514520217594,
+    "parametros": {
+      "pop_size": 292,
+      "crossover_prob": 0.8600000000000001,
+      "mutation_prob": 0.05
+    }
+  }
+}

@@ -505,32 +505,30 @@ def generate_neighborhood_mols(
     C: np.ndarray,
     m_v_matrix: np.ndarray,
     neighborhood: float,
+    rng: np.random.Generator | None = None,
 ) -> list[np.ndarray]:
     """
-    Neighborhood(C, M_V) según ecuación 3.4: un medoide reemplazado por
+    Neighborhood(C, M_V): se elige UN medoide de C al azar y se reemplaza por
     un gen no presente con M_V(reemplazado, reemplazo) <= neighborhood.
+    Si el medoide elegido no tiene reemplazos válidos, retorna [].
     """
+    if rng is None:
+        rng = np.random.default_rng()
+
     k = len(C)
-    bloques = []
+    pos = int(rng.integers(0, k))
+    zk = int(C[pos])
+    close_genes = np.where(m_v_matrix[zk] <= neighborhood)[0]
 
-    for pos in range(k):
-        zk = int(C[pos])
-        close_genes = np.where(m_v_matrix[zk] <= neighborhood)[0]
-
-        # 'zk in C' ya cubre el caso zl == zk (zk siempre pertenece a C),
-        # así que un solo np.isin reemplaza el "if zl == zk or zl in used".
-        valid_zl = close_genes[~np.isin(close_genes, C)]
-        if len(valid_zl) == 0:
-            continue
-
-        bloque = np.tile(C, (len(valid_zl), 1))   # (n_validos, k) — una sola asignación vectorizada
-        bloque[:, pos] = valid_zl
-        bloques.append(bloque)
-
-    if not bloques:
+    # 'zk in C' ya cubre el caso zl == zk (zk siempre pertenece a C),
+    # así que un solo np.isin reemplaza el "if zl == zk or zl in used".
+    valid_zl = close_genes[~np.isin(close_genes, C)]
+    if len(valid_zl) == 0:
         return []
 
-    return list(np.vstack(bloques))
+    bloque = np.tile(C, (len(valid_zl), 1))   # (n_validos, k) — una sola asignación vectorizada
+    bloque[:, pos] = valid_zl
+    return list(bloque)
 
 def _dominates_vec(a: np.ndarray, B: np.ndarray) -> np.ndarray:
     """True donde 'a' domina a B[i] (minimización). a:(2,), B:(m,2)."""
@@ -558,6 +556,7 @@ def mols(
     mode: str,
     population_objectives: np.ndarray | None = None,
     local_budget: int | None = None,
+    rng: np.random.Generator | None = None,
     verbose: bool = False,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
@@ -578,7 +577,12 @@ def mols(
     local_budget : int | None — cuota propia de ESTA llamada (análogo a
         pareto_local_search); evita que una invocación dentro del ciclo de
         NSGA-II consuma TODO el presupuesto restante de una vez.
+    rng : np.random.Generator | None — fuente de aleatoriedad para elegir el
+        medoide que se reemplaza en cada vecindario (uno por solución).
     """
+    if rng is None:
+        rng = np.random.default_rng()
+
     # Comprobación de modo para aceptar soluciones.
     assert mode in ("large", "narrow"), "mode debe ser 'large' o 'narrow'."
     if population_objectives is not None and len(population_objectives) != len(population):
@@ -609,7 +613,7 @@ def mols(
             solution_obj = np.asarray(evaluate_objectives(solution, ge_matrix, bi_matrix), dtype=np.float64)
 
         # Generar vecindario según matriz Mv.
-        neighbors = generate_neighborhood_mols(solution, m_v_matrix, neighborhood)
+        neighbors = generate_neighborhood_mols(solution, m_v_matrix, neighborhood, rng)
         neighbors = [nb for nb in neighbors if frozenset(nb.tolist()) not in seen]
 
         # Evaluar soluciones según cuota de llamadas disponibles.

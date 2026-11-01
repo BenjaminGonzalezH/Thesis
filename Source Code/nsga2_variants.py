@@ -491,6 +491,7 @@ def run_nsga2_MOLS(
                     max_obj_calls=max_obj_function_calls, mode=mode,
                     population_objectives=combined_objectives[f0_idx],
                     local_budget=mols_local_budget,
+                    rng=rng,
                     verbose=False,
                 )
 
