@@ -18,15 +18,15 @@
     }
   },
   "NSGA2_MOLS": {
-    "hv_f1": 90.09559507802945,
+    "hv_f1": 90.06143555229721,
     "parametros": {
-      "pop_size": 278,
-      "crossover_prob": 0.9,
-      "mutation_prob": 0.02,
+      "pop_size": 63,
+      "crossover_prob": 0.88,
+      "mutation_prob": 0.05,
       "M_v": "BOTH",
       "mode": "large",
       "mols_local_budget_pct": 7,
-      "neighborhood_pct": 23
+      "neighborhood_pct": 27
     }
   },
   "NSGA2_DBS": {
