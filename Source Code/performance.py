@@ -154,7 +154,7 @@ def jaccard_population(generations_labels: list[np.ndarray]) -> list[np.ndarray]
 
 # Punto de referencia (editable) para el hipervolumen de F0. Debe ser peor
 # (mayor) que las soluciones del frente en ambos objetivos (minimización).
-HV_REFERENCE_POINT = (10.0, 10.0)
+HV_REFERENCE_POINT = (500.0, 500.0)
 
 def hypervolume_f1(f1_objectives: np.ndarray, ref_point: tuple[float, float] = HV_REFERENCE_POINT) -> float:
     """

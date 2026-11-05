@@ -8,6 +8,7 @@ de genes.
 # Importaciones
 ############################
 import numpy as np              # Operaciones matemáticas.
+from collections import OrderedDict
 
 ############################
 # Variables globales
@@ -27,6 +28,43 @@ except ImportError:
     cp = np
     _GPU = False
     print("[backend] CuPy no encontrado → usando NumPy (CPU).")
+
+
+##################################
+# Caché de matrices en el backend activo
+##################################
+# Las matrices de distancia (n×n) son constantes durante una ejecución, pero las
+# funciones objetivo se invocan miles de veces (con lotes pequeños en PR/PLS).
+# Convertirlas en cada llamada (transferencia host→device en GPU, o copia
+# 2·n² por apilado en CPU) dominaba el costo. Se conservan en un caché LRU
+# pequeño indexado por identidad del arreglo (se guarda la referencia al
+# original, así el id no puede reutilizarse mientras la entrada exista).
+# Supuesto: las matrices NO se mutan in-place durante la ejecución; si se
+# hiciera, llamar a clear_device_cache().
+_DEVICE_CACHE = OrderedDict()
+_DEVICE_CACHE_SIZE = 8
+
+# Tope (bytes) del tensor temporal (n, bloque, k) de build_clusters_population.
+_CLUSTER_CHUNK_BYTES = 128 * 1024 * 1024
+
+def _as_backend(matrix):
+    """Devuelve `matrix` en el backend activo, reutilizando el caché."""
+    if not _GPU:
+        return np.asarray(matrix)            # CPU: sin copia.
+    key = id(matrix)
+    hit = _DEVICE_CACHE.get(key)
+    if hit is not None and hit[0] is matrix:
+        _DEVICE_CACHE.move_to_end(key)
+        return hit[1]
+    dev = cp.asarray(matrix)
+    _DEVICE_CACHE[key] = (matrix, dev)
+    if len(_DEVICE_CACHE) > _DEVICE_CACHE_SIZE:
+        _DEVICE_CACHE.popitem(last=False)
+    return dev
+
+def clear_device_cache():
+    """Vacía el caché (usar si una matriz se modifica in-place)."""
+    _DEVICE_CACHE.clear()
 
 
 ##################################
@@ -83,27 +121,29 @@ def build_clusters_population(
     # Transformación de elementos numpy a matrices manejables por GPU, siendo
     # su equivalente, es decir, D es una matriz cuadrada de orden 'g' genes y 
     # population es un arreglo de 'n' soluciones de 'k' medoides cada una.
-    D   = xp.asarray(distance_matrix)
+    D   = _as_backend(distance_matrix)
     pop = xp.asarray(population)
 
-    # Submatriz de distancia que representa la distancia de cada gen
-    # de la población a los respectivos medoides de cada uno de los
-    # arreglos de medoides para la asignación.
-    # Coordenadas: [gen, solución, medoide].
-    D_pop = D[:, pop]
-    
+    # Submatriz de distancia gen→medoides, coordenadas [gen, solución, medoide],
+    # de tamaño n·m·k. Para acotar el pico de memoria se procesa la población
+    # por bloques de individuos (ver _CLUSTER_CHUNK_BYTES); el resultado es
+    # idéntico al cálculo en un solo paso (el argmin es independiente por individuo).
+    n_genes = D.shape[0]
+    m, k = pop.shape
+    chunk = max(1, _CLUSTER_CHUNK_BYTES // (n_genes * k * D.dtype.itemsize))
+
     # Cluster más cercano para cada elemento, por individuo (0-based).
-    # Coordenadas: [gen, indice de medoide].
-    labels_xp = xp.argmin(D_pop, axis=-1)
+    # Coordenadas: [solución, gen]. Se usa int32 desde el origen (argmin da int64).
+    labels_xp = xp.empty((m, n_genes), dtype=xp.int32)
+    for i in range(0, m, chunk):
+        D_pop = D[:, pop[i:i + chunk]]                      # (n, c, k)
+        labels_xp[i:i + chunk] = xp.argmin(D_pop, axis=-1).T
+        del D_pop
 
-    # Reordenar a (pop_size, n) y pasar a 1-based.
-    # Coordenadas: [solución, asignación de cluster]
-    # Se cambia la asignación a <indice de cluster> + 1.
-    labels_xp = labels_xp.T                 # (pop_size, n)
-
+    # Se cambia la asignación a <indice de cluster> + 1 (1-based).
     if _GPU:
-        return cp.asnumpy(labels_xp).astype(np.int32) + 1
-    return labels_xp.astype(np.int32) + 1
+        return cp.asnumpy(labels_xp) + 1
+    return labels_xp + 1
 
 
 def xie_beni(
@@ -137,28 +177,22 @@ def xie_beni(
     # Declaración de variable como versión global.
     global OBJ_FUNCTION_CALLS
 
-    # Transformación de elementos a interfaz GPU.
-    D_stack = xp.stack([xp.asarray(ge_matrix), xp.asarray(bi_matrix)])      # Fusión de ambas matrices de distancia (Matriz, n, n).
-    med     = xp.asarray(medoids)                                           # Población de medoides asociada (sol, medoides).
-    n       = D_stack.shape[1]                                              # Cantidad de genes.
-    k       = med.shape[0]                                                  # Cantidad de medoides por solución.
+    # Matrices en el backend activo (caché; sin apilar ni copiar).
+    Ds      = (_as_backend(ge_matrix), _as_backend(bi_matrix))              # (GE, BI), cada una (n, n).
+    med     = xp.asarray(medoids)                                           # Medoides de la solución (k,).
+    n       = Ds[0].shape[0]                                                # Cantidad de genes.
+    k       = med.shape[0]                                                  # Cantidad de medoides.
 
     # Elementos asociado a los clusters.
-    cluster_idx     = labels - 1                                            # (n,)   Solución de clustering - 0-based
-    medoid_per_elem = med[cluster_idx]                                      # (n,)   Asociación gen-medoide basado en el índice del gen.
-    idx_mat         = xp.arange(2)[:, None]                                 # (2, 1) Indices de las dos matrices (0: expr ; 1: info).
-    idx_elem        = xp.arange(n)[None, :]                                 # (1, n) Indices asociados a los elementos (genes).
+    cluster_idx     = xp.asarray(labels) - 1                                # (n,)   0-based
+    medoid_per_elem = med[cluster_idx]                                      # (n,)   Medoide asignado a cada gen.
+    idx_elem        = xp.arange(n)
+    diag_mask       = xp.eye(k, dtype=bool)
 
-    # Cálculo de distancia entre el medoide asignado según cada elemento
-    # de los clusters (ambas matrices) y definición del numerador.
-    dist_to_medoid  = D_stack[idx_mat, idx_elem, xp.broadcast_to(medoid_per_elem, (2, n))]
-    numerator       = xp.sum(dist_to_medoid ** 2, axis=1)   # (2,)
-
-    # Calculo del denominador (menor distancia entre clusters)
-    D_med     = D_stack[:, med, :][:, :, med]                               # Sub matriz considerando los medoides.
-    diag_mask = xp.eye(k, dtype=bool)                                       # Marca de diagonal (ignorar al ser 0).
-    D_med_off = xp.where(diag_mask, xp.inf, D_med)                          # Aplicar infinito a las diagonales.
-    min_inter = xp.min(D_med_off ** 2, axis=(1, 2))                         # Par de medoides con menor distancia.
+    # Numerador (suma de distancias² al medoide) y denominador (menor
+    # distancia² entre medoides), por cada matriz.
+    numerator = xp.stack([xp.sum(D[idx_elem, medoid_per_elem] ** 2) for D in Ds])                  # (2,)
+    min_inter = xp.stack([xp.min(xp.where(diag_mask, xp.inf, D[med][:, med]) ** 2) for D in Ds])   # (2,)
 
     # Calculo vectorizado por GPU.
     if _GPU:
@@ -183,34 +217,26 @@ def xie_beni_population(ge_matrix, bi_matrix, population, labels_pop):
     xp = cp if _GPU else np
     global OBJ_FUNCTION_CALLS
 
-    # Transformart elementos a interfaz GPU.
-    D_stack = xp.stack([xp.asarray(ge_matrix), xp.asarray(bi_matrix)])      # Fusión de matrices de distancia (Matriz, n, n).
-    pop = xp.asarray(population)                                            # Población de soluciones medoids array (pop_size, k)
-    lbl = xp.asarray(labels_pop)                                            # Población de soluciones labels array (pop_size, n)
-    pop_size, k = pop.shape                                                 # Número de soluciones, grupos y genes.
-    n = D_stack.shape[1]
+    # Matrices en el backend activo (caché; sin apilar ni copiar).
+    Ds  = (_as_backend(ge_matrix), _as_backend(bi_matrix))                  # (GE, BI), cada una (n, n).
+    pop = xp.asarray(population)                                            # Población de medoides (pop_size, k).
+    lbl = xp.asarray(labels_pop)                                            # Labels (pop_size, n), 1-based.
+    pop_size, k = pop.shape
+    n = Ds[0].shape[0]
 
-    # Elementos asociados a los clusters.
-    cluster_idx = lbl - 1                                                   # Soluciones de clutering en formato 0-based.
-    medoid_per_elem = xp.take_along_axis(pop, cluster_idx, axis=1)          # Aociación gen-medoide (versión globalizada en la población).
-    idx_mat  = xp.arange(2)[:, None, None]                                  # Indices de las dos matrices (0: expr ; 1: info).
-    idx_elem = xp.arange(n)[None, None, :]                                  # Indices asociados a los elementos (genes).
+    # Asociación gen-medoide por individuo.
+    medoid_per_elem = xp.take_along_axis(pop, lbl - 1, axis=1)              # (pop_size, n)
+    idx_elem = xp.arange(n)[None, :]                                        # (1, n)
+    diag_mask = xp.eye(k, dtype=bool)[None, :, :]
+    idx_row = pop[:, :, None]                                               # (pop_size, k, 1)
+    idx_col = pop[:, None, :]                                               # (pop_size, 1, k)
 
-    # Cálculo de distancia entre el medoide asignado según cada elemento
-    # de los clusters (ambas matrices) y definición del numerador.
-    dist_to_medoid = D_stack[idx_mat, idx_elem, medoid_per_elem[None, :, :]]   # (2, pop_size, n)
-    numerator = xp.sum(dist_to_medoid ** 2, axis=2)                            # (2, pop_size)
-
-    # Calculo de denominador: D_med por individuo: se necesita un índice 
-    # de "individuo" explícito para no cruzar medoides entre individuos 
-    # distintos.
-    idx_row = pop[None, :, :, None]     # (1, pop_size, k, 1)
-    idx_col = pop[None, :, None, :]     # (1, pop_size, 1, k)
-    D_med = D_stack[xp.arange(2)[:, None, None, None], idx_row, idx_col]       # (2, pop_size, k, k)
-
-    diag_mask = xp.eye(k, dtype=bool)[None, None, :, :]
-    D_med_off = xp.where(diag_mask, xp.inf, D_med)
-    min_inter = xp.min(D_med_off ** 2, axis=(2, 3))                            # (2, pop_size)
+    # Numerador: suma de distancias² gen→medoide. Denominador: menor
+    # distancia² entre medoides DEL MISMO individuo (índice explícito para
+    # no cruzar medoides entre individuos).
+    numerator = xp.stack([xp.sum(D[idx_elem, medoid_per_elem] ** 2, axis=1) for D in Ds])          # (2, pop_size)
+    min_inter = xp.stack([xp.min(xp.where(diag_mask, xp.inf, D[idx_row, idx_col]) ** 2, axis=(1, 2))
+                          for D in Ds])                                                            # (2, pop_size)
 
     if _GPU:
         numerator, min_inter = cp.asnumpy(numerator), cp.asnumpy(min_inter)
