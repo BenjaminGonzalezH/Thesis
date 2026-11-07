@@ -152,9 +152,65 @@ def jaccard_population(generations_labels: list[np.ndarray]) -> list[np.ndarray]
 
     return jaccard_per_generation
 
+def jaccard_f0_history(history_objectives: list[np.ndarray], history_labels: list[np.ndarray]) -> np.ndarray:
+    """
+    Jaccard promedio entre pares de soluciones de F0, generación a generación
+    (misma definición que el Jaccard final del frente). NaN si |F0| < 2.
+
+    F0 suele repetirse entre generaciones consecutivas, por lo que se cachea el
+    resultado según los labels de F0 para no recalcular Jaccard innecesariamente.
+    """
+    from pareto_sorting import non_dominated_sort           # Import local: evita acoplar módulos al cargar.
+
+    cache: dict[bytes, float] = {}
+    out = np.full(len(history_objectives), np.nan, dtype=np.float64)
+    for g, (obj, lab) in enumerate(zip(history_objectives, history_labels)):
+        if len(obj) == 0:
+            continue
+        f0 = np.asarray(non_dominated_sort(obj)[0])
+        if len(f0) < 2:
+            continue
+        labels_f0 = np.ascontiguousarray(np.asarray(lab)[f0])
+        key = labels_f0.tobytes()                           # Mismo conjunto en el mismo orden => mismo valor.
+        if key not in cache:
+            J = jaccard_index_solutions(labels_f0)
+            cache[key] = float(J[np.triu_indices(len(f0), k=1)].mean())
+        out[g] = cache[key]
+    return out
+
+def _jaccard_mean_all_pairs(labels: np.ndarray) -> float:
+    """
+    Jaccard promedio sobre TODOS los pares de soluciones, calculado de una vez
+    (equivale a jaccard_index_solutions + media del triángulo superior, pero con
+    un único producto de matrices en vez de un bucle por pares).
+    """
+    xp = cp if _GPU else np
+    lab = xp.asarray(labels)
+    m, n = lab.shape
+    K = int(lab.max())
+    one_hot = xp.zeros((m, n, K), dtype=xp.float32)
+    one_hot[xp.arange(m)[:, None], xp.arange(n)[None, :], lab - 1] = 1.0
+    A = one_hot.transpose(1, 0, 2).reshape(n, m * K)
+    G = (A.T @ A).astype(xp.float64).reshape(m, K, m, K)        # Tablas de contingencia de todos los pares.
+    r = (G * (G - 1) / 2).sum(axis=(1, 3))                      # Pares en el mismo cluster en ambas soluciones.
+    s = xp.diag(r)                                              # Pares en el mismo cluster dentro de cada solución.
+    den = s[:, None] + s[None, :] - r
+    J = xp.where(den > 0, r / xp.where(den > 0, den, 1.0), 0.0)
+    iu = np.triu_indices(m, k=1)
+    J = cp.asnumpy(J) if _GPU else J
+    return float(J[iu].mean())
+
+def jaccard_population_history(history_labels: list[np.ndarray]) -> np.ndarray:
+    """Jaccard promedio entre TODOS los individuos de la población, generación a generación (NaN si hay < 2)."""
+    out = np.full(len(history_labels), np.nan, dtype=np.float64)
+    for g, lab in enumerate(history_labels):
+        if len(lab) >= 2:
+            out[g] = _jaccard_mean_all_pairs(np.asarray(lab))
+    return out
+
 # Punto de referencia (editable) para el hipervolumen de F0. Debe ser peor
 # (mayor) que las soluciones del frente en ambos objetivos (minimización).
-HV_REFERENCE_POINT = (500.0, 500.0)
+HV_REFERENCE_POINT = (120.0, 120.0)
 
 def hypervolume_f1(f1_objectives: np.ndarray, ref_point: tuple[float, float] = HV_REFERENCE_POINT) -> float:
     """

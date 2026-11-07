@@ -116,6 +116,7 @@ def pareto_neighborhood_search(
     max_obj_calls: int | None = None,
     rng: np.random.Generator | None = None,
     similitud: bool = False,
+    azar: bool = False,
 ) -> list[dict]:
     """
     Pareto-Neighborhood Search (PNS): se elige UN medoide z_k de C al azar
@@ -143,6 +144,12 @@ def pareto_neighborhood_search(
     similitud       : bool — si True (el algoritmo está estancado), el vecindario
         Pareto se calcula sobre la matriz de similitud (1 - D): se usan los
         genes más LEJANOS a z_k en vez de los más cercanos.
+    azar            : bool — si True (el algoritmo está estancado), el vecindario NO
+        usa frentes de Pareto: es una muestra aleatoria sin reposición de genes
+        fuera de C y fuera de los primeros nF frentes de z_k (aumenta la
+        variabilidad de genes). Su tamaño es el del vecindario Pareto normal de
+        z_k (mismo gasto de cuota que PNS sin estancamiento). Tiene prioridad
+        sobre `similitud`.
 
     Retorna
     -------
@@ -167,10 +174,17 @@ def pareto_neighborhood_search(
     zk = int(C[k - 1])
 
     # ── Vecindario Pareto de z_k sobre TODO el dataset, excluyendo C ──
-    N_zk = _pareto_neighborhood(zk, ge_matrix, bi_matrix, excluir_mask, nF, similitud)
+    if azar:
+        # Mismo tamaño que el vecindario Pareto normal (nF frentes), pero con genes al azar
+        # que NO pertenecen a esos frentes (ni a C): explora genes distintos a los habituales.
+        N_pareto = _pareto_neighborhood(zk, ge_matrix, bi_matrix, excluir_mask, nF, False)
+        elegibles = np.setdiff1d(np.flatnonzero(~excluir_mask), np.fromiter(N_pareto, dtype=np.int64))
+        N_zk = set(rng.choice(elegibles, size=min(len(N_pareto), len(elegibles)), replace=False).tolist())
+    else:
+        N_zk = _pareto_neighborhood(zk, ge_matrix, bi_matrix, excluir_mask, nF, similitud)
 
     if verbose:
-        print(f"[PNS] k={k}  z_k={zk}  |N(z_k)|={len(N_zk)}")
+        print(f"[PNS] k={k}  z_k={zk}  |N(z_k)|={len(N_zk)}" + ("  (azar)" if azar else ""))
 
     if not N_zk:
         return []
@@ -209,10 +223,12 @@ def pareto_neighborhood_search(
 # en "celdas" (medoide más cercano bajo D_mode). El vecindario de un
 # medoide z_k elegido al azar es el percentil `p` de su celda (sin medoides
 # de la solución) MENOS discrepante con z_k (menor |D_mode| = |L|). La
-# partición se reconstruye globalmente con D_GE y el operador retorna solo las
-# candidatas que mejoran AMBOS objetivos del padre (al menos uno si el algoritmo
-# está estancado: el HV de F0 no mejoró); la aceptación (F0 de archivo ∪
-# candidatas, como PLS) la realiza el NSGA-II de cada variante.
+# partición se reconstruye globalmente con D_GE y el operador retorna TODAS las
+# candidatas evaluadas (sin filtrar por objetivos, como PNS); la aceptación (F0
+# de archivo ∪ candidatas, como PLS) la realiza el NSGA-II de cada variante.
+# Si el algoritmo está estancado (DBS no aporta soluciones nuevas a Rv), el
+# vecindario se reemplaza por una muestra aleatoria de genes fuera de C y de
+# N(z_k), del mismo tamaño que N(z_k) (azar → más variabilidad de genes).
 #######################################################
 
 DBS_MODES = ("bio", "no_discrepancy", "expresion")
@@ -256,8 +272,7 @@ def discrepancy_based_search(
     verbose: bool = False,
     max_obj_calls: int | None = None,
     rng: np.random.Generator | None = None,
-    obj_padre: tuple[float, float] | None = None,
-    relajado: bool = False,
+    azar: bool = False,
 ) -> list[dict]:
     """
     Discrepancy-Based Search (DBS): cada gen se asigna al medoide más cercano
@@ -288,18 +303,15 @@ def discrepancy_based_search(
         presupuesto no alcanza para el batch completo, éste se recorta
         (al azar, con `rng`).
     rng             : np.random.Generator | None — selección de z_k y recorte.
-    obj_padre       : (xb_ge, xb_bi) | None — objetivos de C. Si se entrega, el operador
-        retorna SOLO las candidatas que mejoran ambos objetivos (estrictamente), o al
-        menos uno si `relajado`.
-    relajado        : bool — False (intensificación): solo pasan las candidatas que
-        mejoran AMBOS objetivos de `obj_padre`. True (estancamiento): basta con
-        mejorar AL MENOS UNO. El vecindario es el mismo en ambos casos.
+    azar            : bool — si True (el algoritmo está estancado), el vecindario es una
+        muestra aleatoria sin reposición de genes de TODO el dataset fuera de C y
+        de N(z_k) (aumenta la variabilidad de genes). Su tamaño es |N(z_k)| (mismo
+        gasto de cuota que sin estancamiento).
 
     Retorna
     -------
-    list[dict] con llaves "solution", "labels", "xb_ge", "xb_bi" — las candidatas
-    evaluadas que mejoran ambos objetivos de `obj_padre` (al menos uno si
-    `relajado`; todas si `obj_padre` es None; puede quedar vacía).
+    list[dict] con llaves "solution", "labels", "xb_ge", "xb_bi" — TODAS las
+    candidatas evaluadas (sin filtrar por objetivos; puede quedar vacía).
 
     Nota de rendimiento
     --------------------
@@ -337,8 +349,17 @@ def discrepancy_based_search(
     umbral = np.percentile(dists, p * 100)
     candidatos = celda_k[dists <= umbral].astype(C.dtype)
 
+    if azar:
+        # Estancamiento: mismo tamaño que N(z_k), pero genes al azar de todo el dataset
+        # que NO pertenecen a N(z_k) ni a C.
+        elegibles = np.setdiff1d(np.flatnonzero(~es_medoide), candidatos)
+        candidatos = rng.choice(
+            elegibles, size=min(len(candidatos), len(elegibles)), replace=False,
+        ).astype(C.dtype)
+
     if verbose:
-        print(f"[DBS-{mode}] k={k}  z_k={zk}  |Celda_k|={len(celda_k)}  |N(z_k)|={len(candidatos)}")
+        print(f"[DBS-{mode}] k={k}  z_k={zk}  |Celda_k|={len(celda_k)}  |N(z_k)|={len(candidatos)}"
+              + ("  (azar)" if azar else ""))
 
     # ── Cuota global: recorte del batch ───────────────────────────────
     if max_obj_calls is not None:
@@ -364,13 +385,6 @@ def discrepancy_based_search(
         for i in range(len(C_primes))
     ]
 
-    # ── Intensificación: solo pasan las que mejoran AMBOS objetivos de la solución padre;
-    #    si `relajado` (estancamiento), basta con mejorar AL MENOS UNO ──
-    if obj_padre is not None:
-        if relajado:
-            resultado = [d for d in resultado if d["xb_ge"] < obj_padre[0] or d["xb_bi"] < obj_padre[1]]
-        else:
-            resultado = [d for d in resultado if d["xb_ge"] < obj_padre[0] and d["xb_bi"] < obj_padre[1]]
     return resultado
 
 #######################################################
@@ -390,6 +404,7 @@ def run_nsga2_PNS(
     mutation_prob: float = 0.01,
     seed: int | None = None,
     gens_estancamiento: int = 1,
+    estancamiento: str = "azar",
 ) -> dict:
     """
     NSGA-II con PNS: tras construir Rv = Pv ∪ Qv se extrae su frente no
@@ -409,9 +424,14 @@ def run_nsga2_PNS(
     vs max_obj_function_calls), por lo que el criterio de paro es EXACTO.
 
     Estancamiento: la generación en que PNS no aporta soluciones nuevas a Rv
-    cuenta como la 1ª; al llegar a `gens_estancamiento` PNS calcula sus frentes
-    sobre la matriz de similitud (genes más lejanos) hasta volver a aportar.
+    cuenta como la 1ª; al llegar a `gens_estancamiento` PNS cambia de estrategia
+    hasta volver a aportar, según `estancamiento`:
+      - "similitud": frentes sobre la matriz de similitud (genes más lejanos).
+      - "azar" (default): el vecindario es una muestra aleatoria de genes fuera de C y de los
+        nF frentes de z_k, del mismo tamaño que el vecindario Pareto normal
+        (más variabilidad de genes).
     """
+    assert estancamiento in ("similitud", "azar"), "estancamiento debe ser 'similitud' o 'azar'."
     rng = np.random.default_rng(seed)
 
     population = random_medoids_pop(n=n, k=k, pop_size=pop_size, seed=seed)
@@ -483,7 +503,8 @@ def run_nsga2_PNS(
                 candidatas = pareto_neighborhood_search(
                     combined_population[j], ge_matrix, bi_matrix, nF=nF,
                     max_obj_calls=max_obj_function_calls, rng=rng,
-                    similitud=estancado,                 # Estancado → genes más lejanos (matriz de similitud).
+                    similitud=estancado and estancamiento == "similitud",   # Estancado → genes más lejanos.
+                    azar=estancado and estancamiento == "azar",             # Estancado → muestra aleatoria.
                 )
 
                 # Solo candidatas que no estén en Rv ni en el archivo.
@@ -607,12 +628,12 @@ def run_nsga2_DBS(
     eps  : ε de la matriz de discrepancia.
     p    : percentil de vecindad dentro de la celda de cada medoide.
 
-    Intensificación: el vecindario es el percentil p MENOS discrepante con z_k y
-    el operador solo retorna las candidatas que mejoran ambos objetivos de la
-    solución explorada. Si el HV de F0 no mejora en una generación (estancamiento;
-    la que lo suscita cuenta como la 1ª, hasta `gens_estancamiento`), el criterio se
-    relaja a mejorar AL MENOS UN objetivo y se mantiene así hasta que el HV de F0
-    vuelva a mejorar.
+    El vecindario es el percentil p MENOS discrepante con z_k y el operador
+    retorna todas las candidatas evaluadas (la aceptación es la del archivo, como
+    PNS). Estancamiento: la generación en que DBS no aporta soluciones nuevas a Rv
+    cuenta como la 1ª; al llegar a `gens_estancamiento` el vecindario pasa a ser una
+    muestra aleatoria de genes fuera de C y de N(z_k), del mismo tamaño que N(z_k),
+    hasta volver a aportar.
 
     No hay cuota local por generación: la búsqueda local queda acotada por
     una aplicación por solución de F0 y por la cuota global (criterio de paro EXACTO).
@@ -691,8 +712,7 @@ def run_nsga2_DBS(
                 candidatas = discrepancy_based_search(
                     combined_population[j], ge_matrix, bi_matrix, mode=mode, eps=eps, p=p,
                     d_mode=d_mode, max_obj_calls=max_obj_function_calls, rng=rng,
-                    obj_padre=(float(combined_objectives[j][0]), float(combined_objectives[j][1])),
-                    relajado=estancado,                  # Estancado → basta mejorar un objetivo.
+                    azar=estancado,                      # Estancado → muestra aleatoria (fuera de C y de N(z_k)).
                 )
 
                 # Solo candidatas que no estén en Rv ni en el archivo.
@@ -720,6 +740,9 @@ def run_nsga2_DBS(
 
             # Solo soluciones REALMENTE nuevas (que no estaban en Rv).
             agregadas = [entry for key, entry in archivo.items() if key not in rv_keys]
+            # Estancamiento: DBS no varió Rv (la generación en que ocurre cuenta como la 1ª).
+            gens_sin_cambio = 0 if agregadas else gens_sin_cambio + 1
+            estancado = gens_sin_cambio >= gens_estancamiento
             if agregadas:
                 # Objetivos y labels YA calculados dentro del operador (no
                 # re-evaluar: duplicaría el gasto de cuota).
@@ -748,10 +771,6 @@ def run_nsga2_DBS(
         current_fronts = non_dominated_sort(objectives)
         f0_indices = current_fronts[0]
         f0_hv = hypervolume_f1(objectives[f0_indices])
-        # Estancamiento = el HV de F0 no mejoró respecto a la generación anterior.
-        gens_sin_cambio = 0 if f0_hv > history_hv_f1[-1] + 1e-12 else gens_sin_cambio + 1
-        estancado = gens_sin_cambio >= gens_estancamiento
-
         history_objectives.append(objectives.copy())
         history_labels.append(labels_pop.copy())
         history_hv_f1.append(f0_hv)
