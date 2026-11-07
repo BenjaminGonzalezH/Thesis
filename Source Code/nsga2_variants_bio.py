@@ -4,9 +4,9 @@ agregan cada uno de los operadores de búsqueda local basados en información
 biológica como estrategia aplicada sobre el frente no dominado F0 de
 Rv = Pv ∪ Qv, antes de la selección de sobrevivientes.
 
-- run_nsga2_PNS : agrega Pareto-Neighborhood Search.
-- run_nsga2_DBS : agrega Discrepancy-Based Search (regímenes bio / no_discrepancy / expresion; escape por
-                   estancamiento: aceptación relajada a mejorar al menos un objetivo).
+- run_nsga2_PNS : agrega Pareto-Neighborhood Search (escape por estancamiento: azar).
+- run_nsga2_DBS : agrega Discrepancy-Based Search (regímenes bio / no_discrepancy / expresion;
+                   escape por estancamiento: azar).
 
 Cada variante implementa su PROPIO NSGA-II (ciclo completo, sin interfaz
 compartida). En ambas, el operador se aplica una vez sobre cada solución de F0
@@ -85,7 +85,6 @@ def _pareto_neighborhood(
     bi_matrix: np.ndarray,
     excluir_mask: np.ndarray,
     nF: int,
-    similitud: bool = False,
 ) -> set[int]:
     """
     FrentesDeVecindad(a, D_GE, D_BI, excluir, nF): vecindario Pareto del
@@ -94,16 +93,11 @@ def _pareto_neighborhood(
     de los primeros `nF` frentes de Pareto F_0 ∪ ... ∪ F_{nF-1}.
 
     excluir_mask : np.ndarray (n,) bool — True en los medoides de C.
-    similitud    : bool — si True, los frentes se calculan sobre la matriz de
-        similitud S = 1 - D (D normalizada en [0,1]) en vez de la de distancia:
-        se retienen los genes MÁS LEJANOS a `anchor` en vez de los más cercanos.
     """
     mask = ~excluir_mask
     mask[anchor] = False
     elegibles = np.where(mask)[0]
     f_ge, f_bi = ge_matrix[anchor, elegibles], bi_matrix[anchor, elegibles]
-    if similitud:                                            # S = 1 - D: los mínimos de S son los genes más lejanos.
-        f_ge, f_bi = 1.0 - f_ge, 1.0 - f_bi
     sel = _first_nF_fronts_2d(f_ge, f_bi, nF)
     return set(elegibles[sel].tolist())
 
@@ -115,7 +109,6 @@ def pareto_neighborhood_search(
     verbose: bool = False,
     max_obj_calls: int | None = None,
     rng: np.random.Generator | None = None,
-    similitud: bool = False,
     azar: bool = False,
 ) -> list[dict]:
     """
@@ -141,15 +134,11 @@ def pareto_neighborhood_search(
         presupuesto no alcanza para el batch completo, éste se recorta
         (al azar, con `rng`).
     rng             : np.random.Generator | None — selección de z_k y recorte.
-    similitud       : bool — si True (el algoritmo está estancado), el vecindario
-        Pareto se calcula sobre la matriz de similitud (1 - D): se usan los
-        genes más LEJANOS a z_k en vez de los más cercanos.
     azar            : bool — si True (el algoritmo está estancado), el vecindario NO
         usa frentes de Pareto: es una muestra aleatoria sin reposición de genes
         fuera de C y fuera de los primeros nF frentes de z_k (aumenta la
         variabilidad de genes). Su tamaño es el del vecindario Pareto normal de
-        z_k (mismo gasto de cuota que PNS sin estancamiento). Tiene prioridad
-        sobre `similitud`.
+        z_k (mismo gasto de cuota que PNS sin estancamiento).
 
     Retorna
     -------
@@ -177,11 +166,11 @@ def pareto_neighborhood_search(
     if azar:
         # Mismo tamaño que el vecindario Pareto normal (nF frentes), pero con genes al azar
         # que NO pertenecen a esos frentes (ni a C): explora genes distintos a los habituales.
-        N_pareto = _pareto_neighborhood(zk, ge_matrix, bi_matrix, excluir_mask, nF, False)
+        N_pareto = _pareto_neighborhood(zk, ge_matrix, bi_matrix, excluir_mask, nF)
         elegibles = np.setdiff1d(np.flatnonzero(~excluir_mask), np.fromiter(N_pareto, dtype=np.int64))
         N_zk = set(rng.choice(elegibles, size=min(len(N_pareto), len(elegibles)), replace=False).tolist())
     else:
-        N_zk = _pareto_neighborhood(zk, ge_matrix, bi_matrix, excluir_mask, nF, similitud)
+        N_zk = _pareto_neighborhood(zk, ge_matrix, bi_matrix, excluir_mask, nF)
 
     if verbose:
         print(f"[PNS] k={k}  z_k={zk}  |N(z_k)|={len(N_zk)}" + ("  (azar)" if azar else ""))
@@ -404,7 +393,6 @@ def run_nsga2_PNS(
     mutation_prob: float = 0.01,
     seed: int | None = None,
     gens_estancamiento: int = 1,
-    estancamiento: str = "azar",
 ) -> dict:
     """
     NSGA-II con PNS: tras construir Rv = Pv ∪ Qv se extrae su frente no
@@ -424,14 +412,11 @@ def run_nsga2_PNS(
     vs max_obj_function_calls), por lo que el criterio de paro es EXACTO.
 
     Estancamiento: la generación en que PNS no aporta soluciones nuevas a Rv
-    cuenta como la 1ª; al llegar a `gens_estancamiento` PNS cambia de estrategia
-    hasta volver a aportar, según `estancamiento`:
-      - "similitud": frentes sobre la matriz de similitud (genes más lejanos).
-      - "azar" (default): el vecindario es una muestra aleatoria de genes fuera de C y de los
-        nF frentes de z_k, del mismo tamaño que el vecindario Pareto normal
-        (más variabilidad de genes).
+    cuenta como la 1ª; al llegar a `gens_estancamiento` el vecindario pasa a ser una
+    muestra aleatoria de genes fuera de C y de los nF frentes de z_k, del mismo
+    tamaño que el vecindario Pareto normal (azar → más variabilidad de genes),
+    hasta volver a aportar.
     """
-    assert estancamiento in ("similitud", "azar"), "estancamiento debe ser 'similitud' o 'azar'."
     rng = np.random.default_rng(seed)
 
     population = random_medoids_pop(n=n, k=k, pop_size=pop_size, seed=seed)
@@ -503,8 +488,7 @@ def run_nsga2_PNS(
                 candidatas = pareto_neighborhood_search(
                     combined_population[j], ge_matrix, bi_matrix, nF=nF,
                     max_obj_calls=max_obj_function_calls, rng=rng,
-                    similitud=estancado and estancamiento == "similitud",   # Estancado → genes más lejanos.
-                    azar=estancado and estancamiento == "azar",             # Estancado → muestra aleatoria.
+                    azar=estancado,                      # Estancado → muestra aleatoria (fuera de C y de los nF frentes).
                 )
 
                 # Solo candidatas que no estén en Rv ni en el archivo.
