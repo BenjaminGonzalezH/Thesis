@@ -31,7 +31,7 @@ from solution_encoding import load_distance_matrix
 from LS import build_neighborhood_matrix
 from nsga2 import run_nsga2
 from nsga2_variants import run_nsga2_MOPR, run_nsga2_PLS, run_nsga2_MOLS
-from nsga2_variants_bio import run_nsga2_PNS, run_nsga2_DBS, DBS_MODES
+from nsga2_variants_bio import run_nsga2_PNS, run_nsga2_DBS, run_nsga2_MPS, DBS_MODES
 
 ############################
 # Constantes del experimento (según la tabla de parametrización)
@@ -49,6 +49,7 @@ FUNCIONES_OPTUNA = {
     "NSGA2_MOLS":   run_nsga2_MOLS,
     "NSGA2_DBS":    run_nsga2_DBS,
     "NSGA2_PNS":    run_nsga2_PNS,
+    "NSGA2_MPS":    run_nsga2_MPS,
     "NSGA2_MOPR":   run_nsga2_MOPR,
 }
 
@@ -109,6 +110,9 @@ def _sugerir_configuracion(trial: optuna.Trial, variante: str) -> dict:
     elif variante == "NSGA2_DBS":
         cfg["mode"]                 = trial.suggest_categorical("mode", list(DBS_MODES))
         cfg["p_pct"]                = trial.suggest_int("p_pct", 5, 25)
+    elif variante == "NSGA2_MPS":
+        cfg["L"]                    = trial.suggest_int("L", 10, 200)
+        cfg["q_pct"]                = trial.suggest_int("q_pct", 1, 10)
     return cfg
 
 
@@ -133,6 +137,9 @@ def _kwargs_variante(variante: str, cfg: dict, ds: dict, seed: int, max_calls: i
     elif variante == "NSGA2_DBS":
         kw["mode"]             = cfg["mode"]
         kw["p"]                = cfg["p_pct"] / 100                 # Percentil p -> fracción.
+    elif variante == "NSGA2_MPS":
+        kw["L"]                = cfg["L"]
+        kw["q"]                = cfg["q_pct"] / 100                 # Porcentaje q -> fracción.
     return kw
 
 

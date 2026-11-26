@@ -1,0 +1,55 @@
+﻿metrica,dataset,control,gana,empata,pierde,n/a (Friedman n.s.)
+HV,B1,NSGA2_DBS,3,1,0,0
+HV,B1,NSGA2_PNS,3,1,0,0
+HV,B2,NSGA2_DBS,4,0,0,0
+HV,B2,NSGA2_PNS,3,1,0,0
+HV,B3,NSGA2_DBS,3,1,0,0
+HV,B3,NSGA2_PNS,4,0,0,0
+IGD+,B1,NSGA2_DBS,4,0,0,0
+IGD+,B1,NSGA2_PNS,4,0,0,0
+IGD+,B2,NSGA2_DBS,3,1,0,0
+IGD+,B2,NSGA2_PNS,3,1,0,0
+IGD+,B3,NSGA2_DBS,3,1,0,0
+IGD+,B3,NSGA2_PNS,3,1,0,0
+Spread,B1,NSGA2_DBS,0,0,0,4
+Spread,B1,NSGA2_PNS,0,0,0,4
+Spread,B2,NSGA2_DBS,0,0,0,4
+Spread,B2,NSGA2_PNS,0,0,0,4
+Spread,B3,NSGA2_DBS,0,0,0,4
+Spread,B3,NSGA2_PNS,0,0,0,4
+Jaccard,B1,NSGA2_DBS,0,3,1,0
+Jaccard,B1,NSGA2_PNS,0,3,1,0
+Jaccard,B2,NSGA2_DBS,0,0,0,4
+Jaccard,B2,NSGA2_PNS,0,0,0,4
+Jaccard,B3,NSGA2_DBS,0,3,1,0
+Jaccard,B3,NSGA2_PNS,0,3,1,0
+Wang (max),B1,NSGA2_DBS,0,1,3,0
+Wang (max),B1,NSGA2_PNS,0,1,3,0
+Wang (max),B2,NSGA2_DBS,0,4,0,0
+Wang (max),B2,NSGA2_PNS,0,4,0,0
+Wang (max),B3,NSGA2_DBS,0,4,0,0
+Wang (max),B3,NSGA2_PNS,0,4,0,0
+Wang (prom),B1,NSGA2_DBS,1,3,0,0
+Wang (prom),B1,NSGA2_PNS,2,2,0,0
+Wang (prom),B2,NSGA2_DBS,0,4,0,0
+Wang (prom),B2,NSGA2_PNS,0,4,0,0
+Wang (prom),B3,NSGA2_DBS,0,4,0,0
+Wang (prom),B3,NSGA2_PNS,0,4,0,0
+qscore (max),B1,NSGA2_DBS,1,3,0,0
+qscore (max),B1,NSGA2_PNS,1,3,0,0
+qscore (max),B2,NSGA2_DBS,4,0,0,0
+qscore (max),B2,NSGA2_PNS,1,3,0,0
+qscore (max),B3,NSGA2_DBS,0,0,0,4
+qscore (max),B3,NSGA2_PNS,0,0,0,4
+qscore (prom),B1,NSGA2_DBS,4,0,0,0
+qscore (prom),B1,NSGA2_PNS,4,0,0,0
+qscore (prom),B2,NSGA2_DBS,0,0,4,0
+qscore (prom),B2,NSGA2_PNS,0,3,1,0
+qscore (prom),B3,NSGA2_DBS,1,3,0,0
+qscore (prom),B3,NSGA2_PNS,0,4,0,0
+% grupos sin enriquecimiento,B1,NSGA2_DBS,0,0,0,4
+% grupos sin enriquecimiento,B1,NSGA2_PNS,0,0,0,4
+% grupos sin enriquecimiento,B2,NSGA2_DBS,0,3,1,0
+% grupos sin enriquecimiento,B2,NSGA2_PNS,1,3,0,0
+% grupos sin enriquecimiento,B3,NSGA2_DBS,0,4,0,0
+% grupos sin enriquecimiento,B3,NSGA2_PNS,0,2,2,0

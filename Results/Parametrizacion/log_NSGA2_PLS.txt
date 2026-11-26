@@ -1,0 +1,2 @@
+14:50:16 NSGA2_PLS: 50 completados, 0 pendientes (total 50)
+17:22:26 NSGA2_PLS: 50 completados, 0 pendientes (total 50)

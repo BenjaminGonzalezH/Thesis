@@ -1,0 +1,4 @@
+dataset,n_frentes,n_soluciones,n_degeneradas,n_xb_mayor_10,n_frente_combinado_igd
+B1,217,3773,0,1,25
+B2,217,4945,0,0,40
+B3,217,6580,0,1,41
